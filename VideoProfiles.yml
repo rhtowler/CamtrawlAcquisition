@@ -1,0 +1,33 @@
+#  VideoPresets.yml defines some canned profiles for recording video
+#  The point is to make it easier for novices to collect video data without
+#  knowing the details of codec setup.
+
+default:
+    encoder: mpeg4
+    file_ext:  .mp4
+    framerate: 10
+    bitrate: 1200000
+    bit_rate_tolerance: 528000
+    scale: 100
+    pixel_format: yuv420p
+    max_frames_per_file: 1000
+
+mjpeg:
+    encoder: mjpeg
+    file_ext:  .avi
+    framerate: 10
+    bitrate: 1024000
+    bit_rate_tolerance: 528000
+    scale: 100
+    pixel_format: yuvj420p
+    max_frames_per_file: 250
+
+h264:
+    encoder: h264
+    file_ext:  .avi
+    framerate: 10
+    bitrate: 1024000
+    bit_rate_tolerance: 528000
+    scale: 100
+    pixel_format: yuv420p
+    max_frames_per_file: 250

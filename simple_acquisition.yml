@@ -1,0 +1,135 @@
+application:
+    # Set the mode of collection.
+    #
+    # The Camtrawl platform defines one on/off cycle as a deployment. Traditionally, data from
+    # a deployment would be written to a directory named after the date and time the system
+    # was powered on. This works well when each on/off cycle is a separate deployment, such
+    # as when a camera system is deployed on a net during a trawl. Data for that deployment
+    # is contained within the single folder
+    #
+    # Recently there has been a need for long term deployments where the camera system
+    # is turned on and off periodically to collects images. In these cases, the deployment is
+    # not a single on/off event so it is not desirable to log data to a separate folder each time
+    # the system is powered on.
+    #
+    # The output_mode can be used to specify how data are organized when collected to
+    # support both of these use cases:
+    #
+    #    Set output_mode to "separate" to collect data in separate folders for each on/off
+    #    cycle. This is the traditional Camtrawl behavior. In this case, output_path will define
+    #    where these deployment folders will be written. For example, if output_path is set
+    #    to c:\data, the application will create deployment folders below that like
+    #    c:\data\D20210101-T120024
+    #
+    #    Set output_mode to "combined" to collect data in a single folder for each on/off
+    #    cycle. In this case, output_path defines the single folder where all data will be written.
+    #    When the system powers on in combined mode, it determines how many existing
+    #    images have been collected, updates the image counter, and adds additional images
+    #    to the specified directory.
+
+    output_mode: combined
+
+    #  Define the path to the directory where the data will be written. The data directories
+    #  will automaticallybe created within this directory.
+    output_path: C:/camtrawl/data
+
+    # You can specify the log level
+    log_level: DEBUG
+
+
+acquisition:
+
+    #  THIS SECTION NEEDS TO BE REWORKED - Now that we're using OpenCV and pyAV for
+    #  writing files we can handle a bunch of formats so the simple .jpg/.avi approach will not work.
+    #  Ultimately we should identify the major formats and file types and then constrain the
+    #  choices
+
+
+    # Specify the output type: jpg or avi
+    # If set to "jpg", the application will acquire jpeg stills. If set to "avi" the application will acquire
+    # a video clip using the encoder specified below. We
+    output_type: jpeg
+
+    # if output type is jpg - stills will be acquired. The avi options will be ignored.
+    #  NOTE: currently the jpeg quality is not applied when saved.
+    still_quality: 85
+    still_interval_ms: 100
+    acquire_n_stills: 20
+
+    # if output type is avi- set video parameters. The jpg options will be ignored.
+    # video_codec can be whatever pyAV accepts, but I've had mixed results thus
+    # far. For example 'h264' records a video that is the correct length but only has
+    # a single frame.
+    video_codec:  mjpeg
+    video_bitrate:  400000
+    video_framerate: 10
+    video_duration_seconds: 5
+
+
+# Define the individual camera parameters
+cameras:
+   # The default camera properties are applied if a specific camera entry
+   # cannot be found. The "default" section is not required and can be
+   # omitted to ensure that only specific cameras be utilized.
+    default:
+      # Specify the gain in dB - valid values depend on the camera used
+        gain: 20
+      # Specify the exposure in microseconds - valid values depend on the camera used
+        exposure_us: 6000
+      # Specify the camera label - this is written to the camera table in the metadata database
+      # and can be used by downstream applications to help users identify the camera. For
+      # example 'left' or 'right' for stereo systems.
+        label: camera
+      # Specify the rotation to be applied to the image before saving or emitting
+      # values: none, cw90, cw180, cw270, fliplr, flipud
+        rotation:  cw90
+      # Set hdr_save_merged to True to save the merged HDR image to disk
+        hdr_enabled: False
+      # Set hdr_save_merged to True to save the merged HDR image to disk
+        hdr_save_merged:  True
+      # Set hdr_signal_merged to True to emit an imageData signal containing the merged HDR image data
+        hdr_signal_merged:  False
+      # The merge method can be:mertens, robertson or debevec
+      # More information can be found in the OpenCV documentation
+        hdr_merge_method:  mertens
+      # hdr_settings defines the details of each HDR exposure
+        hdr_settings:
+            Image1:
+                exposure: 1000
+                gain: 15
+             # set emit_signal to True to emit an imageData signal containing the Image1 exposure data
+                emit_signal: False
+             # set save_image to True to write the Image1 data to disk
+                save_image:  True
+            Image2:
+                exposure: 3500
+                gain: 15
+                emit_signal: False
+                save_image: True
+            Image3:
+                exposure: 7000
+                gain: 15
+                emit_signal: True
+                save_image:  True
+            Image4:
+                exposure: 14000
+                gain:  15
+                emit_signal: False
+                save_image:  True
+
+    # You can specify properties to apply to specific cameras by creating an entry
+    # using the camera name. Camera entries for cameras that aren't connected to
+    # the system will be ignored. This is typically what you want to do for multi-camera
+    # systems.
+
+#    Chameleon3 CM3-U3-50S5M_16306616:
+#        gain: 18
+#        exposure_us: 1000
+#        label: right
+#
+#    Blackfly BFLY-PGE-50S5M_17219622:
+#        gain: 18
+#        exposure_us: 1000
+#        label: left
+
+
