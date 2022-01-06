@@ -1,6 +1,6 @@
 
 """
-spin_camera.py
+SpinCamera.py
 
 This class provides a high level interface to Point Grey/Flir machine
 vision cameras using the Flir pySpin Spinnaker SDK.
@@ -45,7 +45,7 @@ import numpy as np
 import cv2
 
 
-class spin_camera(QtCore.QObject):
+class SpinCamera(QtCore.QObject):
 
     #  Specify the delay, in ms, required after the exposure ends before the
     #  camera will be ready for the next software trigger. I'm not sure if this
@@ -78,7 +78,7 @@ class spin_camera(QtCore.QObject):
 
     def __init__(self, spin_cam, parent=None):
 
-        super(spin_camera, self).__init__(parent)
+        super(SpinCamera, self).__init__(parent)
 
         self.cam = spin_cam
         self.device_info = None
@@ -102,7 +102,6 @@ class spin_camera(QtCore.QObject):
         self.save_image_divider = 1
         self.trigger_divider = 1
         self.dbResponse = None
-
         self.label = 'camera'
         self.ND_pixelFormat = PySpin.PixelFormat_BGR8 #PySpin.PixelFormat_BGR16
 
@@ -133,7 +132,7 @@ class spin_camera(QtCore.QObject):
 
     def get_hdr_settings(self, nodemap=None):
         '''
-        get_hdr_settings qureies the camera and returns the camera's HDR settings in a dict
+        get_hdr_settings queries the camera and returns the camera's HDR settings in a dict
         '''
 
         hdr_parameters = {}
@@ -435,7 +434,7 @@ class spin_camera(QtCore.QObject):
         #  make sure this isn't a stale event and/or ignore buffer flushes. Sometimes
         #  we need to trigger the camera but don't want to process the images at all.
         #  In these cases, we set self.n_triggered = 0 and trigger the camera directly
-        #  without calling spin_camera.trigger method.
+        #  without calling SpinCamera.trigger method.
         if self.n_triggered == 0:
             return
 
@@ -450,7 +449,7 @@ class spin_camera(QtCore.QObject):
             if self.trigger_mode == PySpin.TriggerSource_Software:
                 #  If we're software triggering in HDR mode, we have to delay our
                 #  trigger to allow the camera to get ready.
-                self.sw_trig_timer.start(spin_camera.HDR_SW_TRIG_DELAY)
+                self.sw_trig_timer.start(SpinCamera.HDR_SW_TRIG_DELAY)
             else:
                 #  for hardware triggering, emit the trigger signal.
                 self.triggerReady.emit(self, self.exposures[idx], True)
@@ -563,8 +562,6 @@ class spin_camera(QtCore.QObject):
 
                     # apply gamma correction using the lookup table
                     hdr_data = cv2.LUT(hdr_data , table)
-
-
 
                     merged_image['is_hdr'] = False
 
@@ -1053,14 +1050,14 @@ class spin_camera(QtCore.QObject):
         node_event_notification.SetIntValue(node_event_notification_off.GetValue())
 
         #  trigger, get image, and discard
-        for i in range(spin_camera.SETTINGS_LAG):
+        for i in range(SpinCamera.SETTINGS_LAG):
             self.cam.TriggerSoftware.Execute()
-            sleep(spin_camera.HDR_SW_TRIG_DELAY / 1000.)
+            sleep(SpinCamera.HDR_SW_TRIG_DELAY / 1000.)
             try:
                 _ = self.get_image()
             except:
                 pass
-        sleep(spin_camera.HDR_SW_TRIG_DELAY / 1000.)
+        sleep(SpinCamera.HDR_SW_TRIG_DELAY / 1000.)
 
         #  Enable event notifications and restore the trigger state
         node_event_notification.SetIntValue(node_event_notification_on.GetValue())
@@ -1101,16 +1098,16 @@ class spin_camera(QtCore.QObject):
         #  trigger, get image, and check if this image has the same exposure as
         #  HDR Image4. If not, continue to trigger until Image4 is obtained.
         self.cam.TriggerSoftware.Execute()
-        sleep(spin_camera.HDR_SW_TRIG_DELAY / 1000.)
+        sleep(SpinCamera.HDR_SW_TRIG_DELAY / 1000.)
         spin_image = self.get_image()
         #  Check for an exposure that is within 15 us of the commanded exposure for
         #  Image4. We allow for a 15 us difference because the actual exposure will
         #  rarely be the exact commanded exposure.
         while abs(spin_image['exposure'] - self.hdr_parameters["Image4"]['exposure']) > 15:
             self.cam.TriggerSoftware.Execute()
-            sleep(spin_camera.HDR_SW_TRIG_DELAY / 1000.)
+            sleep(SpinCamera.HDR_SW_TRIG_DELAY / 1000.)
             spin_image = self.get_image()
-        sleep(spin_camera.HDR_SW_TRIG_DELAY / 1000.)
+        sleep(SpinCamera.HDR_SW_TRIG_DELAY / 1000.)
 
         #  Enable event notifications and restore the trigger state
         node_event_notification.SetIntValue(node_event_notification_on.GetValue())

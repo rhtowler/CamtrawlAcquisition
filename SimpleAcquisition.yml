@@ -1,9 +1,9 @@
-# CamtrawlAcquisition.yml
+# SimpleAcquisition.yml
 #
-# This file provides configuration parameters for CamtrawlAcquisition.py
+# This file provides configuration parameters for SimpleAcquisition.py
 #
 # If a configuration parameter defined below is commented or missing, the default value
-# will be used. Defaults are defined at the top of CamtrawlAcquisition.py
+# will be used. Defaults are defined at the top of SimpleAcquisition.py
 #
 
 #  specify some general application settings
@@ -49,12 +49,6 @@ application:
     # This can be set, in increasing verboseness, to ERROR, WARNING, INFO, or DEBUG. Normally
     # you would set this to INFO.
     log_level: DEBUG
-
-    #  Set always_trigger_at_start to True to always start triggering when the application
-    #  starts regardless of the system state. Normally the system will only start triggering
-    #  in "deployed" mode. This can be enabled for testing. It can also be used to force the
-    #  system to acquire on deck prior to deployment when the pressure sensor/switch fails.
-    always_trigger_at_start: False
 
     #  Set shut_down_on_exit to True to have the application shut the computer down when the
     #  application exits. This is the normal behavior for a deployed camtrawl system. This
@@ -259,71 +253,18 @@ cameras:
                 emit_signal: False
                 save_image:  True
 
+
+
     # Here are some simple examples of camera specific settings.
-    Chameleon3 CM3-U3-50S5M_16316618:
+    Chameleon3 CM3-U3-50S5M_16306616:
         gain: 18
         exposure_us: 1000
         label: right
 
-    Blackfly BFLY-PGE-50S5M_17219632:
+    Blackfly BFLY-PGE-50S5M_17219622:
         gain: 18
         exposure_us: 1000
         label: left
-
-
-# This section is for setting basic parameters used by the Camtrawl Controller which is a
-# hardware device that provides power management, sensor integration, and triggering for
-# the Camtrawl stereo camera platform.
-controller:
-    # The Camtrawl Controller is a hardware device that provides power, sensor data, on/off
-    # control, and synchronized hardware triggering for the Camtrawl system. It is not
-    # required to run this software.
-
-    #  set this to True if you are using a Camtrawl controller
-    use_controller: False
-
-    #  the controller connects to the acquisition PC using a serial interface. Set the
-    #  port the controller is connected to here. For Windows this will be something like
-    #  "COM3". For Linux systems it will be something like "/dev/ttyUSB0"
-    serial_port: COM3
-
-    #  set the baud rate. The Arduino based Camtrawl Controller runs at 921600
-    baud_rate: 921600
-
-    #  specify the time, in microseconds, that the strobes are triggered prior to the
-    #  cameras being triggered. This provides time for LED strobes to ramp to full
-    #  intensity.
-    strobe_pre_fire:  100
-
-    # The Camtrawl Controller has two strobe trigger channels. Here you can set the
-    # channel(s) that will be triggered when the camera acquires an image. Set
-    # strobe_channel=1 to trigger channel 1, set strobe_channel=2 to trigger channel 2
-    # and set strobe_channel=3 to trigger both. The correct setting depends on how
-    # your strobes are connected to the controller.
-    strobe_channel: 3
-
-
-#  The sensors section contains configuration details for the handling of sensor data.
-sensors:
-
-    #  if a sensor header is unknown, it will be logged as the default type.
-    default_type: synchronous
-
-    #  synchronous sensor data is cached when received and written to disk when
-    #  the cameras are triggered and it is associated with an image number. List the
-    #  headers here for sensor datagrams that should be logged as synchronous
-    synchronous: [$OHPR]
-
-    #  asynchronous sensor data is written to disk when received. List the
-    #  headers here for sensor datagrams that should be logged as asynchronous
-    asynchronous: [$CTCS,  $SBCS,  $IMUC,  $CTSV]
-
-    #  synchronous_timeout specifies how long synced sensor data will be cached (in seconds.)
-    synchronous_timeout: 5
-
-
-
-
 
 
 
