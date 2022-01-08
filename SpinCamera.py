@@ -1,38 +1,34 @@
+# coding=utf-8
+
+#     National Oceanic and Atmospheric Administration (NOAA)
+#     Alaskan Fisheries Science Center (AFSC)
+#     Resource Assessment and Conservation Engineering (RACE)
+#     Midwater Assessment and Conservation Engineering (MACE)
+
+#  THIS SOFTWARE AND ITS DOCUMENTATION ARE CONSIDERED TO BE IN THE PUBLIC DOMAIN
+#  AND THUS ARE AVAILABLE FOR UNRESTRICTED PUBLIC USE. THEY ARE FURNISHED "AS
+#  IS."  THE AUTHORS, THE UNITED STATES GOVERNMENT, ITS INSTRUMENTALITIES,
+#  OFFICERS, EMPLOYEES, AND AGENTS MAKE NO WARRANTY, EXPRESS OR IMPLIED,
+#  AS TO THE USEFULNESS OF THE SOFTWARE AND DOCUMENTATION FOR ANY PURPOSE.
+#  THEY ASSUME NO RESPONSIBILITY (1) FOR THE USE OF THE SOFTWARE AND
+#  DOCUMENTATION; OR (2) TO PROVIDE TECHNICAL SUPPORT TO USERS.
 
 """
-SpinCamera.py
+.. module:: CamtrawlAcquisition.SpinCamera
 
-This class provides a high level interface to Point Grey/Flir machine
-vision cameras using the Flir pySpin Spinnaker SDK.
+    :synopsis: SpinCamera provides a high level interface for FLIR machine
+               vision cameras using the FLIR PySpin SDK.
 
-This class is designed to acquire single images from a Flir MV camera
-using triggering. While it can be used to write video files, it is not
-optimized to record video at high frame rates. No assumptions are made
-regarding the state the camera and all critical settings are handled by
-the class.
-
-During the development of this class I stumbled on a bug in the
-Chameleon3 firmware where "chunk data" exposure values were 1 frame ahead
-of the actual exposure. This is related to the fact that with CMOS cameras
-settings lag 2 triggers. When you apply a setting such as exposure, it is
-copied to the camera register. On the next trigger it will be copied to the
-sensor registers and the image returned will have the old exposure. The next
-trigger will return an image with the commanded exposure. The Chameleon3
-firmware didn't take this into account.
-
-If when in HDR mode, your camera is not syncing correctly and the reported
-exposures do not match the actual exposures then you may need to update your
-camera's firmware.
-
-More info on when settings take effect can be found here:
-
-https://www.flir.com/support-center/iis/machine-vision/knowledge-base/when-does-a-change-to-a-camera-setting-take-effect/
-
-
-Rick Towler
-MACE Group
-NOAA Alaska Fisheries Science Center
-
+| Developed by:  Rick Towler   <rick.towler@noaa.gov>
+| National Oceanic and Atmospheric Administration (NOAA)
+| National Marine Fisheries Service (NMFS)
+| Alaska Fisheries Science Center (AFSC)
+| Midwater Assesment and Conservation Engineering Group (MACE)
+|
+| Author:
+|       Rick Towler   <rick.towler@noaa.gov>
+| Maintained by:
+|       Rick Towler   <rick.towler@noaa.gov>
 """
 
 from PyQt5 import QtCore
@@ -46,6 +42,32 @@ import cv2
 
 
 class SpinCamera(QtCore.QObject):
+    """
+    This class provides a high level interface to Point Grey/Flir machine
+    vision cameras using the Flir pySpin Spinnaker SDK.
+
+    This class is designed to acquire single images from a Flir MV camera
+    using triggering. While it can be used to write video files, it is not
+    optimized to record video at high frame rates.
+
+    During the development of this class I stumbled on a bug in the
+    Chameleon3 firmware where "chunk data" exposure values were 1 frame ahead
+    of the actual exposure. This is related to the fact that with CMOS cameras
+    settings lag 2 triggers. When you apply a setting such as exposure, it is
+    copied to the camera register. On the next trigger it will be copied to the
+    sensor registers and the image returned will have the old exposure. The next
+    trigger will return an image with the commanded exposure. The Chameleon3
+    firmware didn't take this into account.
+
+    If when in HDR mode, your camera is not syncing correctly and the reported
+    exposures do not match the actual exposures then you may need to update your
+    camera's firmware.
+
+    More info on when settings take effect can be found here:
+
+    https://www.flir.com/support-center/iis/machine-vision/knowledge-base/when-does-a-change-to-a-camera-setting-take-effect/
+
+    """
 
     #  Specify the delay, in ms, required after the exposure ends before the
     #  camera will be ready for the next software trigger. I'm not sure if this
@@ -69,6 +91,7 @@ class SpinCamera(QtCore.QObject):
     saveImage = QtCore.pyqtSignal(str, dict)
     imageSaved = QtCore.pyqtSignal(object, str)
     error = QtCore.pyqtSignal(str, str)
+    cameraDebug = QtCore.pyqtSignal(str, str)
     acquisitionStarted = QtCore.pyqtSignal(object, str, bool)
     stoppingAcquisition = QtCore.pyqtSignal()
     acquisitionStopped = QtCore.pyqtSignal(object, str, bool)
@@ -838,6 +861,7 @@ class SpinCamera(QtCore.QObject):
         self.image_writer.writerStopped.connect(self.image_writer_stopped)
         self.image_writer.error.connect(self.image_writer_error)
         self.image_writer.writeComplete.connect(self.image_write_complete)
+        self.image_writer.writerDebug.connect(self.image_writer_debug)
 
         #  these signals handle the cleanup when we're done
         self.image_writer.writerStopped.connect(thread.quit)
@@ -953,22 +977,33 @@ class SpinCamera(QtCore.QObject):
 
     @QtCore.pyqtSlot(str, str)
     def image_write_complete(self, camera_name, filename):
-        '''The image_write_complete slot is called when the image_writer has
-       finished writing each image/frame.
         '''
-
+        The image_write_complete slot is called when the image_writer has
+        finished writing each image/frame.
+        '''
         #  re-emit as a camera signal
         self.imageSaved.emit(self, filename)
 
 
     @QtCore.pyqtSlot(str, str)
     def image_writer_error(self, camera_name, error_string):
-        '''The image_write_complete slot is called when the image_writer has
-       finished writing each image/frame.
+        '''
+        The image_writer_error slot is called when the image_writer runs into
+        an error. We just pass this along...
+        '''
+        #  re-emit as a camera signal
+        self.error.emit(self.camera_name, error_string)
+
+
+    @QtCore.pyqtSlot(str, str)
+    def image_writer_debug(self, camera_name, debug_string):
+        '''
+        The image_writer_debug slot is called when the image_writer emits a
+        debug message. We just pass this along...
         '''
 
         #  re-emit as a camera signal
-        self.error.emit(self.camera_name, error_string)
+        self.cameraDebug.emit(self.camera_name, debug_string)
 
 
     @QtCore.pyqtSlot(list)

@@ -36,8 +36,11 @@ import os
 import sys
 import datetime
 import logging
+import functools
 import collections
 import yaml
+import numpy as np
+import cv2
 import SpinCamera
 import PySpin
 from PyQt5 import QtCore
@@ -77,14 +80,13 @@ class AcquisitionBase(QtCore.QObject):
                              'video_scale': 100}
 
     #DEFAULT_VIDEO_PROFILE defines the default options for the 'default' video profile.
-    DEFAULT_VIDEO_PROFILE = {'encoder': 'mpeg4',
-                             'file_ext': '.mp4',
-                             'framerate': 10,
-                             'bitrate': 1200000,
-                             'bit_rate_tolerance': 528000,
-                             'scale': 100,
-                             'pixel_format': 'yuv420p',
-                             'max_frames_per_file': 1000}
+    DEFAULT_VIDEO_PROFILE = {'encoder':'libx265',
+                              'file_ext':'.mp4',
+                              'preset':'fast',
+                              'crf':26,
+                              'pixel_format':'yuv420p',
+                              'max_frames_per_file': 1000,
+                              'ffmpeg_debug_out': False}
 
     #  define PyQt Signals
     stopAcquiring = QtCore.pyqtSignal(list)
@@ -146,8 +148,9 @@ class AcquisitionBase(QtCore.QObject):
         self.configuration['application']['output_path'] = './data'
         self.configuration['application']['log_level'] = 'INFO'
         self.configuration['application']['database_name'] = 'CamtrawlMetadata.db3'
-        self.configuration['application']['shut_down_on_exit'] = True
+        self.configuration['application']['shut_down_on_exit'] = False
         self.configuration['application']['always_trigger_at_start'] = False
+        self.configuration['application']['ffmpeg_path'] = ''
 
         self.configuration['acquisition']['trigger_rate'] = 5
         self.configuration['acquisition']['trigger_limit'] = -1
@@ -239,6 +242,8 @@ class AcquisitionBase(QtCore.QObject):
             fileHandler.setFormatter(formatter)
             self.logger.addHandler(fileHandler)
             consoleLogger = logging.StreamHandler(sys.stdout)
+            consoleformatter = logging.Formatter('%(asctime)s : %(message)s')
+            consoleLogger.setFormatter(consoleformatter)
             self.logger.addHandler(consoleLogger)
 
         except:
@@ -259,12 +264,23 @@ class AcquisitionBase(QtCore.QObject):
             QtCore.QCoreApplication.instance().quit()
             return
 
-        #  log file is set up and directories created - note it and keep moving
+        #  log file is set up and directories created. Get some basic info into the logs
         self.logger.info("Camtrawl Acquisition Starting...")
         self.logger.info("CamtrawlAcquisition version: " + self.VERSION)
 
+        #  note the config files we loaded
+        self.logger.info("Configuration file loaded: " + self.config_file)
+        self.logger.info("Profiles file loaded: " + self.profiles_file)
+        self.logger.info("Logging data to: " + self.base_dir)
+
         #  open/create the image metadata database file
         self.OpenDatabase()
+
+        #  report versions
+        self.logger.info('Python version: %s' % (sys.version))
+        self.logger.info('Numpy version: %s' % (np.__version__))
+        self.logger.info('OpenCV version: %s' % (cv2.__version__))
+        self.logger.info('PyQt5 version: %s' % (QtCore.QT_VERSION_STR))
 
         #  configure the cameras...
         ok = self.ConfigureCameras()
@@ -331,11 +347,13 @@ class AcquisitionBase(QtCore.QObject):
             self.logger.critical("No cameras found!")
             return False
         elif (self.num_cameras == 1):
+            s = 'camera'
             self.logger.info('1 camera found.')
         else:
+            s = 'cameras'
             self.logger.info('%d cameras found.' % self.num_cameras)
 
-        self.logger.info("Configuring cameras:")
+        self.logger.info("Configuring " + s + ":")
 
         #  work thru the list of discovered cameras
         for cam in cam_list:
@@ -376,6 +394,17 @@ class AcquisitionBase(QtCore.QObject):
                 else:
                     #  use the system acquisition rate as the video framerate
                     video_profile['framerate'] = self.configuration['acquisition']['trigger_rate']
+
+                #  insert the ffmpeg path to the video profile. Convert relative paths to
+                #  absolute.
+
+                if self.configuration['application']['ffmpeg_path'][0:1] in ['./', '.\\']:
+                    #  get the directory containing this script
+                    ffpath = functools.reduce(lambda l,r: l + os.path.sep + r,
+                            os.path.dirname(os.path.realpath(__file__)).split(os.path.sep))
+                else:
+                    ffpath = self.configuration['application']['ffmpeg_path']
+                video_profile['ffmpeg_path'] = os.path.normpath(ffpath)
 
                 #  add or update this camera in the database
                 if self.use_db:
@@ -469,6 +498,7 @@ class AcquisitionBase(QtCore.QObject):
                 sc.imageData.connect(self.CamImageAcquired)
                 sc.triggerComplete.connect(self.CamTriggerComplete)
                 sc.error.connect(self.LogCamError)
+                sc.cameraDebug.connect(self.LogCamDebug)
                 sc.acquisitionStarted.connect(self.AcquisitionStarted)
                 sc.acquisitionStopped.connect(self.AcquisitionStopped)
                 self.trigger.connect(sc.trigger)
@@ -487,6 +517,17 @@ class AcquisitionBase(QtCore.QObject):
                 #  received state to false
                 self.cameras.append(sc)
                 self.received[sc.camera_name] = False
+
+                if config['save_stills']:
+                    self.logger.info('    %s: Saving stills as %s  Scale: %i' % (sc.camera_name,
+                            image_options['file_ext'], image_options['scale']))
+
+                if config['save_video']:
+                    self.logger.info('    %s: Saving video as %s  Video profile: %s' % (sc.camera_name,
+                            video_profile['file_ext'], config['video_preset']))
+
+                self.logger.info('    %s: Image data will be written to: %s' % (sc.camera_name,
+                            self.image_dir + os.sep + sc.camera_name))
 
                 #  emit the startAcquiring signal to start the cameras
                 self.startAcquiring.emit([sc], self.image_dir, config['save_stills'],
@@ -579,6 +620,10 @@ class AcquisitionBase(QtCore.QObject):
             #  check if we're configured for a limited number of triggers
             if ((self.configuration['acquisition']['trigger_limit'] > 0) and
                 (self.this_images > self.configuration['acquisition']['trigger_limit'])):
+
+                    self.logger.info("Trigger limit of %i triggers reached. Shutting down..." %
+                            (self.this_images-1))
+
                     #  time to stop acquiring - call our StopAcquisition method and set
                     #  exit_app to True to exit the application after the cameras stop.
                     self.StopAcquisition(exit_app=True,
@@ -591,8 +636,8 @@ class AcquisitionBase(QtCore.QObject):
                 if next_int_time_ms < 0:
                     next_int_time_ms = 0
 
-                self.logger.debug("Trigger %d. Last interval (ms)=%8.4f  Next trigger (ms)=%8.4f" % (self.this_images,
-                        elapsed_time_ms, next_int_time_ms))
+                self.logger.debug("Trigger %d. Last interval (ms)=%8.4f  Next trigger (ms)=%8.4f" %
+                        (self.this_images, elapsed_time_ms, next_int_time_ms))
 
                 #  start the next trigger timer
                 self.triggerTimer.start(next_int_time_ms)
@@ -608,6 +653,16 @@ class AcquisitionBase(QtCore.QObject):
         self.logger.error(cam_name + ':ERROR:' + error_str)
 
 
+    @QtCore.pyqtSlot(str, str)
+    def LogCamDebug(self, cam_name, debug_str):
+        '''
+        The LogCamDebug slot is called when a camera emits some debug info. For now
+        we just log the error and move on.
+        '''
+        #  log it.
+        self.logger.debug(cam_name + ':DEBUG:' + debug_str)
+
+
     @QtCore.pyqtSlot(object, str, bool)
     def AcquisitionStarted(self, cam_obj, cam_name, success):
         '''
@@ -615,9 +670,9 @@ class AcquisitionBase(QtCore.QObject):
         startAcquiring signal.
         '''
         if success:
-            self.logger.info('    ' + cam_name + ': acquisition started.')
+            self.logger.info(cam_name + ': acquisition started.')
         else:
-            self.logger.error('    ' + cam_name + ': unable to start acquisition.')
+            self.logger.error(cam_name + ': unable to start acquisition.')
             #  NEED TO CLOSE THIS CAMERA?
 
 

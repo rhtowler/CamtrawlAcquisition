@@ -1,24 +1,70 @@
+# coding=utf-8
+
+#     National Oceanic and Atmospheric Administration (NOAA)
+#     Alaskan Fisheries Science Center (AFSC)
+#     Resource Assessment and Conservation Engineering (RACE)
+#     Midwater Assessment and Conservation Engineering (MACE)
+
+#  THIS SOFTWARE AND ITS DOCUMENTATION ARE CONSIDERED TO BE IN THE PUBLIC DOMAIN
+#  AND THUS ARE AVAILABLE FOR UNRESTRICTED PUBLIC USE. THEY ARE FURNISHED "AS
+#  IS."  THE AUTHORS, THE UNITED STATES GOVERNMENT, ITS INSTRUMENTALITIES,
+#  OFFICERS, EMPLOYEES, AND AGENTS MAKE NO WARRANTY, EXPRESS OR IMPLIED,
+#  AS TO THE USEFULNESS OF THE SOFTWARE AND DOCUMENTATION FOR ANY PURPOSE.
+#  THEY ASSUME NO RESPONSIBILITY (1) FOR THE USE OF THE SOFTWARE AND
+#  DOCUMENTATION; OR (2) TO PROVIDE TECHNICAL SUPPORT TO USERS.
+
 """
-image_writer.py
+.. module:: CamtrawlAcquisition.ImageWriter
 
-Rick Towler
-MACE Group
-NOAA Alaska Fisheries Science Center
+    :synopsis: Class that handles writing image data to disk. Handles
+               still and video file writing.
 
+| Developed by:  Rick Towler   <rick.towler@noaa.gov>
+| National Oceanic and Atmospheric Administration (NOAA)
+| National Marine Fisheries Service (NMFS)
+| Alaska Fisheries Science Center (AFSC)
+| Midwater Assesment and Conservation Engineering Group (MACE)
+|
+| Author:
+|       Rick Towler   <rick.towler@noaa.gov>
+| Maintained by:
+|       Rick Towler   <rick.towler@noaa.gov>
 """
 
+import os
+import subprocess as sp
+import shlex
 import numpy as np
 from PyQt5 import QtCore
 import cv2
-import av
+
 
 class ImageWriter(QtCore.QObject):
+    '''
+    The ImageWriter class handles writing image data to disk for the
+    camera classes. A camera will instantiate the writer and move it to
+    its own thread and then pass images to it for writing.
 
-    SUPPORTED_VIDEO_EXT = ['.avi', '.mp4', '.mpeg4', '.mkv']
+    Credit use of subprocess and the ffmpeg binary to Rotem:
+
+    https://stackoverflow.com/questions/61260182/how-to-output-x265-compressed-video-with-cv2-videowriter
+
+    This is a work in progress...
+
+    '''
+
+    VIDEO_SUPPORTED_EXT = ['.avi', '.mp4', '.mpeg4', '.mkv']
+
+    # specify the common video options. These are options that are explicitly
+    # handled by the writer. Any options not in this list will be passed as
+    # video encoder specific parameters to ffmpeg.
+    VIDEO_COMMON_OPTIONS = ['encoder', 'framerate', 'pixel_format', 'max_frames_per_file',
+            'scale', 'file_ext', 'ffmpeg_path', 'ffmpeg_debug_out']
 
     #  define PyQt Signals
     writeComplete = QtCore.pyqtSignal(str, str)
     writerStopped = QtCore.pyqtSignal(str)
+    writerDebug = QtCore.pyqtSignal(str,str)
     error = QtCore.pyqtSignal(str, str)
 
     def __init__(self, camera_name, parent=None):
@@ -28,16 +74,17 @@ class ImageWriter(QtCore.QObject):
         self.camera_name = camera_name
         self.frame_number = 0
         self.is_recording = False
-        self.avi_stream = None
+        self.ffmpeg_process = None
+        self.ffmpeg_out = None
         self.filename = ''
         self.save_video = False
-        self.video_options = {'encoder':'mpeg4', #'h264'
-                              'file_ext':'.avi',
-                              'framerate':10,
-                              'bitrate':1200000,
-                              'scale':100,
+        self.video_options = {'encoder':'libx265',
+                              'file_ext':'.mp4',
+                              'preset':'fast',
+                              'crf':26,
                               'pixel_format':'yuv420p',
                               'max_frames_per_file': 1000}
+
         self.save_images = True
         self.image_options = {'file_ext':'.jpg',
                               'jpeg_quality':90,
@@ -131,6 +178,7 @@ class ImageWriter(QtCore.QObject):
                     if self.video_options['file_ext'][0] != '.':
                         self.video_options['file_ext'] = '.' + self.video_options['file_ext']
                     filename = image_data['filename'] + self.video_options['file_ext']
+                    print(filename)
 
                     self.StartRecording(filename, scaled_image.shape[1],
                             scaled_image.shape[0])
@@ -145,14 +193,17 @@ class ImageWriter(QtCore.QObject):
 
             #  add this frame
             try:
+                # increase the video frame counter
                 self.frame_number = self.frame_number + 1
-                frame = av.VideoFrame.from_ndarray(scaled_image, format='bgr24')
-                for packet in self.avi_stream.encode(frame):
-                    self.avi_writer.mux(packet)
 
+                # pass the image data to ffmpeg
+                self.ffmpeg_process.stdin.write(scaled_image.tobytes())
+
+                # emit the write complete signal
                 self.writeComplete.emit(self.camera_name, self.filename)
 
             except Exception as ex:
+                # there was a problem...
                 self.error.emit(self.camera_name, 'write_image Error: %s' % ex)
 
 
@@ -164,18 +215,42 @@ class ImageWriter(QtCore.QObject):
             self.StopRecording()
 
         try:
-            #  create the video writer and set params
-            self.avi_writer = av.open(filename, 'w')
-            self.avi_stream = self.avi_writer.add_stream(self.video_options['encoder'],
-                    self.video_options['framerate'])
+            #  generate the base ffmpeg command string
+            command_string = (f'ffmpeg.exe -y -s {width}x{height} -pixel_format bgr24 ' +
+                    f'-f rawvideo -r {self.video_options["framerate"]} -i pipe: -c:v ' +
+                    f'{self.video_options["encoder"]}  ')
 
-            #self.avi_stream.crf=22
-#            self.avi_stream.bit_rate = self.video_options['bitrate']
-#            if 'bit_rate_tolerance' in  self.video_options:
-#                self.avi_stream.bit_rate_tolerance = self.video_options['bit_rate_tolerance']
-            self.avi_stream.pix_fmt = self.video_options['pixel_format']
-            self.avi_stream.height = height
-            self.avi_stream.width = width
+            #  insert the codec specific options
+            for option, value in self.video_options.items():
+                if option not in self.VIDEO_COMMON_OPTIONS:
+                    command_string += f'-{option} {value} '
+
+            #  add the pixel format
+            command_string += f'-pix_fmt {self.video_options["pixel_format"]} '
+
+            #  and end with the output file name
+            command_string += "'" + filename + "'"
+
+            #  emit the ffmpeg command string so we can log it
+            self.writerDebug.emit(self.camera_name, 'Encoder started: ' + command_string)
+
+            #  parse the command line args and add the
+            command_args = shlex.split(command_string)
+            if self.video_options["ffmpeg_path"] == '':
+                #  no path passed, we're using whatever is on the system path
+                command_args[0] = command_args[0]
+            else:
+                #  we've been passed a path so we need to add the separator
+                command_args[0] = self.video_options["ffmpeg_path"] + os.sep + command_args[0]
+
+            if self.video_options["ffmpeg_debug_out"]:
+                out_filename = os.path.splitext(filename)[0] + '_debug.txt'
+                self.ffmpeg_out = open(out_filename, 'w')
+                self.ffmpeg_process = sp.Popen(command_args, stdin=sp.PIPE, stderr=self.ffmpeg_out)
+            else:
+                #  send output to NULL
+                self.ffmpeg_out = None
+                self.ffmpeg_process = sp.Popen(command_args, stdin=sp.PIPE, stderr=sp.DEVNULL)
 
             #  reset the frame counter and set the recording state
             self.frame_number = 0
@@ -183,6 +258,7 @@ class ImageWriter(QtCore.QObject):
             self.is_recording = True
 
         except Exception as ex:
+            self.ffmpeg_process = None
             self.is_recording = False
             self.error.emit(self.camera_name, 'Start Recording Error: %s' % ex)
 
@@ -193,15 +269,27 @@ class ImageWriter(QtCore.QObject):
         and emit the writerStopped signal when done. If we're just writing stills
         there's nothing to close so this method just emits the signal.
 
-        The signal_stop keyword is used internally to stop without signalling in
+        The signal_stop keyword is used internally to stop without signaling in
         cases where we need to roll the video file (close the old one and open a
         new one.) In this case we don't want to signal we've stopped.
         '''
 
         if (self.is_recording):
             try:
-                self.avi_writer.close()
-                self.avi_stream = None
+
+                if self.ffmpeg_process:
+                    # Close and flush stdin
+                    self.ffmpeg_process.stdin.close()
+                    # Wait for sub-process to finish
+                    self.ffmpeg_process.wait()
+                    # Terminate the sub-process
+                    self.ffmpeg_process.terminate()
+
+                if self.ffmpeg_out:
+                    self.ffmpeg_out.close()
+
+                self.ffmpeg_process = None
+                self.ffmpeg_out = None
                 self.frame_number = 0
                 self.filename = ''
                 self.is_recording = False
@@ -214,6 +302,4 @@ class ImageWriter(QtCore.QObject):
             #  so just emit the signal.
             if signal_stop:
                 self.writerStopped.emit(self.camera_name)
-
-
 
