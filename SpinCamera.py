@@ -968,6 +968,8 @@ class SpinCamera(QtCore.QObject):
         any open files.)
         '''
 
+        print("CAM image_writer_stopped")
+
         #  image_writer_stopped - if self.acquiring == False, we're in the process
         #  of stopping acquisition and were waiting for the writer to close files.
         #  The writer has now stopped so we signal that acquisition has stopped.

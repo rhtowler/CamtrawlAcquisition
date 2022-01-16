@@ -38,14 +38,17 @@ import datetime
 import logging
 import functools
 import collections
+#  import order seems to matter on linux. QtCore and QtSql (in metadata_db)
+#  have to be imported before (I think) cv2. If not you get a weird error
+#  loading a shared library when importing them.
+from PyQt5 import QtCore
+from metadata_db import metadata_db
 import yaml
 import numpy as np
 import cv2
 import SpinCamera
 import PySpin
-from PyQt5 import QtCore
 from CamtrawlServer import CamtrawlServer
-from metadata_db import metadata_db
 
 
 class AcquisitionBase(QtCore.QObject):
@@ -381,7 +384,8 @@ class AcquisitionBase(QtCore.QObject):
                 #  update it with the options from this camera's config
                 if config['video_preset'] in self.video_profiles:
                     #  update the video profile dict with the preset values
-                    video_profile.update(self.video_profiles[config['video_preset']])
+                    #video_profile.update(self.video_profiles[config['video_preset']])
+                    video_profile = self.video_profiles[config['video_preset']]
 
                 #  insert the scaling factor into the video profile
                 video_profile['scale'] = config['video_scale']
@@ -396,15 +400,17 @@ class AcquisitionBase(QtCore.QObject):
                     video_profile['framerate'] = self.configuration['acquisition']['trigger_rate']
 
                 #  insert the ffmpeg path to the video profile. Convert relative paths to
-                #  absolute.
-
-                if self.configuration['application']['ffmpeg_path'][0:1] in ['./', '.\\']:
-                    #  get the directory containing this script
-                    ffpath = functools.reduce(lambda l,r: l + os.path.sep + r,
-                            os.path.dirname(os.path.realpath(__file__)).split(os.path.sep))
+                #  absolute. Empty/None assumes ffmpeg is on the system path
+                if self.configuration['application']['ffmpeg_path'] in [None, '']:
+                    video_profile['ffmpeg_path'] = None
                 else:
-                    ffpath = self.configuration['application']['ffmpeg_path']
-                video_profile['ffmpeg_path'] = os.path.normpath(ffpath)
+                    if self.configuration['application']['ffmpeg_path'][0:1] in ['./', '.\\']:
+                        #  get the directory containing this script
+                        ffpath = functools.reduce(lambda l,r: l + os.path.sep + r,
+                                os.path.dirname(os.path.realpath(__file__)).split(os.path.sep))
+                    else:
+                        ffpath = self.configuration['application']['ffmpeg_path']
+                    video_profile['ffmpeg_path'] = os.path.normpath(ffpath)
 
                 #  add or update this camera in the database
                 if self.use_db:

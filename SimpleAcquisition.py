@@ -1,10 +1,11 @@
+#!/usr/bin/env python3
 # coding=utf-8
-
+#
 #     National Oceanic and Atmospheric Administration (NOAA)
 #     Alaskan Fisheries Science Center (AFSC)
 #     Resource Assessment and Conservation Engineering (RACE)
 #     Midwater Assessment and Conservation Engineering (MACE)
-
+#
 #  THIS SOFTWARE AND ITS DOCUMENTATION ARE CONSIDERED TO BE IN THE PUBLIC DOMAIN
 #  AND THUS ARE AVAILABLE FOR UNRESTRICTED PUBLIC USE. THEY ARE FURNISHED "AS
 #  IS."  THE AUTHORS, THE UNITED STATES GOVERNMENT, ITS INSTRUMENTALITIES,
@@ -12,7 +13,7 @@
 #  AS TO THE USEFULNESS OF THE SOFTWARE AND DOCUMENTATION FOR ANY PURPOSE.
 #  THEY ASSUME NO RESPONSIBILITY (1) FOR THE USE OF THE SOFTWARE AND
 #  DOCUMENTATION; OR (2) TO PROVIDE TECHNICAL SUPPORT TO USERS.
-
+#
 """
 .. module:: CamtrawlAcquisition.SimpleAcquisition
 
@@ -35,8 +36,9 @@
 
 
 import os
-from AcquisitionBase import AcquisitionBase
 from PyQt5 import QtCore
+from AcquisitionBase import AcquisitionBase
+
 
 
 class SimpleAcquisition(AcquisitionBase):

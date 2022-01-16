@@ -216,7 +216,7 @@ class ImageWriter(QtCore.QObject):
 
         try:
             #  generate the base ffmpeg command string
-            command_string = (f'ffmpeg.exe -y -s {width}x{height} -pixel_format bgr24 ' +
+            command_string = (f'ffmpeg -y -s {width}x{height} -pixel_format bgr24 ' +
                     f'-f rawvideo -r {self.video_options["framerate"]} -i pipe: -c:v ' +
                     f'{self.video_options["encoder"]}  ')
 
@@ -236,7 +236,8 @@ class ImageWriter(QtCore.QObject):
 
             #  parse the command line args and add the
             command_args = shlex.split(command_string)
-            if self.video_options["ffmpeg_path"] == '':
+
+            if self.video_options["ffmpeg_path"] in [None, '']:
                 #  no path passed, we're using whatever is on the system path
                 command_args[0] = command_args[0]
             else:
@@ -246,6 +247,7 @@ class ImageWriter(QtCore.QObject):
             if self.video_options["ffmpeg_debug_out"]:
                 out_filename = os.path.splitext(filename)[0] + '_debug.txt'
                 self.ffmpeg_out = open(out_filename, 'w')
+                self.ffmpeg_out.write(command_string)
                 self.ffmpeg_process = sp.Popen(command_args, stdin=sp.PIPE, stderr=self.ffmpeg_out)
             else:
                 #  send output to NULL

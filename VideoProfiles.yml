@@ -76,6 +76,16 @@ x265-fast:
     ffmpeg_debug_out: True
 
 
+x264-fast:
+    encoder: libx264
+    preset: fast
+    crf: 26
+    pixel_format: yuv420p
+    file_ext:  .mkv
+    max_frames_per_file: 1000
+    ffmpeg_debug_out: True
+
+
 # If your ffmpeg has been compiled with the --enable-nvenc option you may be able to use
 # the nvidia hardware accelerated codecs for encoding video. This also requires specific
 # hardware and drivers
@@ -91,6 +101,17 @@ hevc_nvenc-fast:
     preset: fast
     crf: 26
     pixel_format: yuv420p
+    file_ext:  .mkv
+    max_frames_per_file: 1000
+    ffmpeg_debug_out: True
+
+
+
+
+#  As of now, this isn't working on the only tested platform: RPi4 + ubuntu 20.04.3 LTS 64-bit
+h264_linux_hw:
+    encoder: h264_v4l2m2m
+    pixel_format: nv21 #yuv420p
     file_ext:  .mkv
     max_frames_per_file: 1000
     ffmpeg_debug_out: True
