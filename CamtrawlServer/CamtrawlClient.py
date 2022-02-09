@@ -11,7 +11,7 @@ network connection.
 connectToServer(host address, port)
 disconnectFromServer()
 getImage(camera, compressed=False, scale=100, quality=80)
-setData(sensorID, data, time=None)
+setData(sensorID, data, asyncSensor=False, time=None)
 getData(sensorID=None)
 getParameter(module, parameter)
 setParameter(module, parameter, value)
@@ -259,10 +259,18 @@ class CamtrawlClient(QtCore.QObject):
             self.sendRequest(request.SerializeToString())
 
 
-    def setData(self, sensorID, data, time=None):
+    def setData(self, sensorID, data, asyncSensor=False, time=None):
         '''
-        setData will inject CSV style data into the server application's sensor data
-        stream.
+        setData will inject NMEA0183 style data into the CamtrawlAcquisition sensor data
+        stream. Data from the sensor data stream is written to the acquisition
+        metadata SQLLite file. Camtrawl has 2 types of sensors. synchronous sensors provide
+        data that is recorded when the cameras are triggered. This data is stored in the
+        sensor_data table and is keyed by image number. Examples are GPS location,
+        camera depth, camera orientation. Asynchronous sensors are sensors that aren't
+        directly tied to an image and are typically recorded at a much lower rate. These
+        data are written to the async_data table and are keyed by time only. Synced data is
+        buffered by the server and written to the database when the cameras are next
+        triggered. Async data is written immediately to the database.
 
         sensorID (str)          A unique string defining the sensor ID. Avoid using the
                                 following reserved sensor IDs:
@@ -280,6 +288,15 @@ class CamtrawlClient(QtCore.QObject):
                                 where header_id uniquely identifies the data contained in the data
                                 string.
 
+        asyncSensor (bool)      Set this to True to identify the data as asynchronous. Async
+                                data is tagged with the current system time and written to
+                                the async_data table immediately upon receipt. If the time keyword
+                                is provided, the data are tagged with that time.
+
+                                Set asyncSensor to False to identify synchronous data that will
+                                be buffered by the camera system and tagged with the image number
+                                and written to disk THE NEXT TIME THE SYSTEM IS TRIGGERED.
+
         time (datetime)         Set to a datetime object representing the time the data was
                                 generated or received. This only has an effect on asynchronous
                                 sensor data which is tagged with the provided time and logged
@@ -293,14 +310,19 @@ class CamtrawlClient(QtCore.QObject):
                     "$GPRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W*6A"]
         client.setData(sensorID, data)
 
+        These GPS data strings would be sent to the server and written to the sensor_data
+        table the next time the cameras were triggered.
 
-        An example of data from a near real-time processing client:
+        An example of async data from a near real-time processing client:
 
         sensorID = "TargetDetector"
         data     = ["Target, 876, Walleye Pollock, 32.3, 93.2",
                     "Target, 876, Pacific Cod, 28.7, 98.3",
                     "Target, 876, Unknown, 2.7, 45.3"]
-        client.setData(sensorID, data)
+        client.setData(sensorID, data, asyncSensor=True)
+
+        These fictitious data strings would be sent to the server and written to the async_data
+        table immediately upon receipt and would be tagged with the current system time.
 
         '''
 
@@ -309,6 +331,12 @@ class CamtrawlClient(QtCore.QObject):
             #  if data is passed as a string, put it in a list
             if (isinstance(data, str)):
                 data = [data]
+
+            #  set the sensor type
+            if (asyncSensor):
+                type = CamtrawlServer_pb2.sensorType.Value('ASYNC')
+            else:
+                type = CamtrawlServer_pb2.sensorType.Value('SYNC')
 
             #  if time is not provided, use the current time
             if not time:
@@ -321,6 +349,7 @@ class CamtrawlClient(QtCore.QObject):
                 sensor.id = sensorID
                 sensor.header = d.split(',')[0].strip()
                 sensor.timestamp = time.timestamp()
+                sensor.type = type
                 sensor.data = d
 
             #  create a msg message to wrap our SETSENSOR message
@@ -555,9 +584,9 @@ class CamtrawlClient(QtCore.QObject):
                         image_data['ok'] = True
                         image_data['exposure'] = jpeg.exposure
                         image_data['gain'] = jpeg.gain
-                        image_data['height'] = jpeg.rows
-                        image_data['width'] = jpeg.cols
-                        image_data['timestamp'] = datetime.fromtimestamp(jpeg.timestamp)
+                        image_data['height'] = jpeg.height
+                        image_data['width'] = jpeg.width
+                        image_data['timestamp'] = datetime.datetime.fromtimestamp(jpeg.timestamp)
                         image_data['filename'] = jpeg.filename
                         image_data['image_number'] = jpeg.image_number
 

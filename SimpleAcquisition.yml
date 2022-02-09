@@ -40,8 +40,8 @@ application:
 
     #  Define the path to the directory where the data will be written. The data directories
     #  will automatically be created within this directory.
-    #output_path: C:/camtrawl/data
-    output_path: /home/camtrawl/camtrawl_data
+    output_path: C:/camtrawl/data
+    #output_path: /home/camtrawl/camtrawl_data
 
     #  specify the name of the SQLite metadata database file.
     database_name: CamtrawlMetadata.db3
@@ -64,8 +64,8 @@ application:
     #
     # Most linux systems have ffmpeg in their package repositories. Windows users can
     # download binaries from https://www.ffmpeg.org/download.html
-    #ffmpeg_path: ./ffmpeg/bin
-    ffmpeg_path:
+    ffmpeg_path: ./ffmpeg/bin
+    #ffmpeg_path:
 
 
 #  specify some details about how fast and how many times cameras should be triggered
@@ -86,14 +86,14 @@ acquisition:
     # exiting. Set to -1 to trigger indefinitely. Note that the global trigger counter
     # is used when determining if the trigger limit has been met. Camera specific settings
     # may result in fewer images being recorded.
-    trigger_limit: 5000
+    trigger_limit: 500
 
 
 # The Camtrawl server provides a command and control interface and serves up image and
 # sensor data on the network. It can be used in conjunction with the Camtrawl client in
 # applications for remote viewing and control of the system.
 server:
-    start_server: False
+    start_server: True
 
     # specify the network interface (by IP) where the server should listen. Use the
     # address 0.0.0.0 to open a connection on all interfaces.
@@ -101,6 +101,27 @@ server:
 
     # specify the port number the server should listen on. the default is 7889
     server_port: 7889
+
+
+
+#  The sensors section contains configuration details for the handling of sensor data.
+#  In SimpleAcquisition.py the only sensor data source is the CamtrawlServer.
+sensors:
+
+    #  if a sensor header is unknown, it will be logged as the default type.
+    default_type: synchronous
+
+    #  synchronous sensor data is cached when received and written to disk when
+    #  the cameras are triggered and it is associated with an image number. List the
+    #  headers here for sensor datagrams that should be logged as synchronous
+    synchronous: [$GPGGA, $GPRMC, $GPGLL]
+
+    #  asynchronous sensor data is written to disk when received. List the
+    #  headers here for sensor datagrams that should be logged as asynchronous
+    asynchronous: []
+
+    #  synchronous_timeout specifies how long synced sensor data will be cached (in seconds.)
+    synchronous_timeout: 5
 
 
 # Define the individual camera parameters
@@ -121,10 +142,10 @@ cameras:
     # images with minimal initial configuration.
     default:
         # Specify the gain in dB - valid values depend on the camera used
-        gain: 16
+        gain: 35
 
         # Specify the exposure in microseconds - valid values depend on the camera used
-        exposure_us: 8000
+        exposure_us: 6000
 
         # Specify the camera label - this is written to the camera table in the metadata database
         # and can be used by downstream applications to help users identify the camera. For
@@ -175,7 +196,7 @@ cameras:
         # (experimental) Specify if this camera should save video files. This feature is
         # experimental and rather fussy at this point and it is easy to create files that
         # don't play correctly.
-        save_video: True
+        save_video: False
 
         # (experimental) Specify the video "preset" defined in the VideoProfiles.yml that
         # will be used to set up the video encoder. Tuning parameters for various encoders
@@ -276,6 +297,8 @@ cameras:
         gain: 18
         exposure_us: 1000
         label: left
+
+
 
 
 

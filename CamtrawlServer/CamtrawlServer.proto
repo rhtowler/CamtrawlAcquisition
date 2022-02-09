@@ -54,7 +54,7 @@ message jpeg {
     required int32 width = 4;
     required int32 height = 5;
     required int32 exposure = 6;
-    required int32 gain = 7;
+    required float gain = 7;
     required bytes jpg_data = 8;
     required string filename = 9;
     required string label = 10;
@@ -68,7 +68,7 @@ message cvMat {
     required int32 cols = 5;
     required int32 depth = 6;
     required int32 exposure = 7;
-    required int32 gain = 8;
+    required float gain = 8;
     required string elt_type = 9;
     required uint32 elt_size = 10;
     required bytes mat_data = 11;

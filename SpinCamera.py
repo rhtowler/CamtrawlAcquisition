@@ -787,7 +787,7 @@ class SpinCamera(QtCore.QObject):
         image_data['data'] = converted_image.GetNDArray().copy()
         image_data['ok'] = True
         image_data['exposure'] = round(chunk_data.GetExposureTime())
-        image_data['gain'] = chunk_data.GetGain()
+        image_data['gain'] = round(chunk_data.GetGain(), 2)
         image_data['height'] = converted_image.GetHeight()
         image_data['width'] = converted_image.GetWidth()
 
@@ -967,8 +967,6 @@ class SpinCamera(QtCore.QObject):
         been told to stop and it is finished shutting down (i.e. closing
         any open files.)
         '''
-
-        print("CAM image_writer_stopped")
 
         #  image_writer_stopped - if self.acquiring == False, we're in the process
         #  of stopping acquisition and were waiting for the writer to close files.

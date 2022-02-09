@@ -34,7 +34,7 @@ class metadata_db(QtCore.QObject):
         return self.is_open
 
 
-    def update_camera(self, name, address, model, label, rot):
+    def update_camera(self, name, device_id, serial, label, rot, version, speed):
         '''
         update_camera updates this camera's info in the cameras table. The camera is
         added if it doesn't exist in the table
@@ -49,11 +49,12 @@ class metadata_db(QtCore.QObject):
                 break
 
         if has_camera:
-            sql = ("UPDATE cameras SET camera='" + name + "', mac_address='" + address + "', model='" +
-                    model + "', label='" + label + "', rotation='" + rot + "'")
+            sql = ("UPDATE cameras SET camera='" + name + "', device_id='" + device_id + "', serial_number='" +
+                    serial + "', label='" + label + "', rotation='" + rot + "', device_version='" +
+                    version + "', device_speed='" + speed + "'")
         else:
-            sql = ("INSERT INTO cameras VALUES('" + name + "','" + address + "','" + model + "','" + label +
-                    "','" + rot + "')")
+            sql = ("INSERT INTO cameras VALUES('" + name + "','" + device_id + "','" +
+                    serial + "','" + label + "','" + rot + "','" + version + "','" + speed + "')")
         query = QtSql.QSqlQuery(sql, self.db)
         query.exec_()
 
@@ -111,11 +112,17 @@ class metadata_db(QtCore.QObject):
         query.exec_()
 
 
-    def add_image(self, image_num, cam_name, trig_time, image_filename, exposure):
+    def add_image(self, image_num, cam_name, trig_time, image_filename, exposure,
+            gain, discarded=0, md5=None):
+
+        if not md5:
+            md5 = 'NULL'
+        else:
+            md5 = "'" + md5 + "'"
 
         time_str = self.datetime_to_db_str(trig_time)
         sql = ("INSERT INTO images VALUES(" + str(image_num) + ",'" + cam_name + "','" + time_str + "','" +
-                image_filename + "'," + str(exposure) + ")")
+                image_filename + "'," + str(exposure) + "," + str(gain) + "," + str(discarded) + ',' + md5 + ")")
         query = QtSql.QSqlQuery(sql, self.db)
         query.exec_()
 
@@ -136,8 +143,8 @@ class metadata_db(QtCore.QObject):
     def create_database(self):
 
         # list of SQL statements that define the base camtrawlMetadata database schema
-        sql = ["CREATE TABLE cameras (camera TEXT NOT NULL, mac_address TEXT, model TEXT, label TEXT, rotation TEXT, PRIMARY KEY(camera))",
-               "CREATE TABLE images (number INTEGER NOT NULL, camera TEXT NOT NULL, time TEXT, name TEXT, exposure_us INTEGER, PRIMARY KEY(number,camera))",
+        sql = ["CREATE TABLE cameras (camera TEXT NOT NULL, device_id TEXT, serial_number TEXT, label TEXT, rotation TEXT, device_version TEXT, device_speed TEXT, PRIMARY KEY(camera))",
+               "CREATE TABLE images (number INTEGER NOT NULL, camera TEXT NOT NULL, time TEXT, name TEXT, exposure_us INTEGER, gain FLOAT, discarded INTEGER, md5_checksum TEXT, PRIMARY KEY(number,camera))",
                "CREATE TABLE dropped (number INTEGER NOT NULL, camera TEXT NOT_NULL, time TEXT, PRIMARY KEY(number,camera))",
                "CREATE TABLE sensor_data (number INTEGER NOT NULL, time TEXT NOT NULL, sensor_id TEXT NOT NULL, header TEXT NOT NULL, data TEXT, PRIMARY KEY(number,time,sensor_id,header))",
                "CREATE TABLE async_data (time TEXT NOT NULL, sensor_id TEXT NOT NULL, header TEXT NOT NULL, data TEXT, PRIMARY KEY(time,sensor_id,header))",

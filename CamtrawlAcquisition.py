@@ -35,7 +35,6 @@
 
 
 import os
-import datetime
 from AcquisitionBase import AcquisitionBase
 from PyQt5 import QtCore
 import CamtrawlController
@@ -132,60 +131,6 @@ class CamtrawlAcquisition(AcquisitionBase):
         #  controller we know that the controller serial port could not be opened.
         self.controllerStarting = True
         self.controller.startController()
-
-
-    @QtCore.pyqtSlot(str, str, datetime.datetime, str,)
-    def SensorDataAvailable(self, sensor_id, header, rx_time, data):
-        '''
-        The SensorDataAvailable slot is called when the CamtrawlController
-        emits the sensorData signal. This signal is emitted when sensor data i
-        received from the controller. It can also be emitted by the CamtrawlServer
-        if sensor data is received by the server.
-
-        CamtrawlAcquisition lumps sensor data into 2 groups. Synced sensor data
-        is cached when received and then logged to the database when the cameras
-        are triggered and the data are linked to the image. Async sensor data is
-        logged immediately and is not linked to any image.
-
-        Args:
-            sensor_id (TYPE):
-                DESCRIPTION
-            header (TYPE):
-                DESCRIPTION
-            rx_time (TYPE):
-                DESCRIPTION
-            data (TYPE):
-                DESCRIPTION
-
-        Returns:
-            None
-
-
-        '''
-
-        #  determine if this data is synced or async
-        is_synchronous = self.default_is_synchronous
-        if header in self.configuration['sensors']['synchronous']:
-            is_synchronous = True
-        elif header in self.configuration['sensors']['asynchronous']:
-            is_synchronous = False
-
-        if is_synchronous:
-            #  this data should be cached to be written to the db when
-            #  the cameras are triggered
-
-            #  first check if we have an entry for this sensor
-            if sensor_id not in self.sensorData:
-                #  nope, add it
-                self.sensorData[sensor_id] = {}
-
-            #  add the data
-            self.sensorData[id][header] = {'time':rx_time, 'data':data}
-
-        else:
-            #  this is async sensor data so we just write it
-            if self.use_db:
-                self.db.insert_async_data(sensor_id, header, rx_time, data)
 
 
     @QtCore.pyqtSlot(int)
@@ -395,24 +340,6 @@ class CamtrawlAcquisition(AcquisitionBase):
 
         # call the base class's TriggerCameras method
         super().TriggerCameras()
-
-        # TODO: Currently we only write a single entry in the sensor_data table for
-        #       HDR acquisition sequences because we're not incrementing the image
-        #       counter for each HDR frame. Since we're not incrementing the number
-        #       we don't have a unique key in the sensor_data table for the 3 other
-        #       HDR exposures. If we want to change this, the easiest approach would
-        #       be to use a decimal notation of image_number.HDR_exposure for the
-        #       image numbers. For example, 143.1, 143.2, 143.3, 143.4
-
-        #  and write synced sensor data  to the db
-        for sensor_id in self.sensorData:
-            for header in self.sensorData[sensor_id]:
-                #  check if the data is fresh
-                freshness = self.trig_time - self.sensorData[sensor_id][header]['time']
-                if freshness.seconds <= self.configuration['sensors']['synchronous_timeout']:
-                    #  it is fresh enough. Write it to the db
-                    self.db.add_imageinsert_sync_data(self.n_images, sensor_id, header,
-                            self.sensorData[sensor_id][header]['data'])
 
 
     @QtCore.pyqtSlot(object, list, bool)

@@ -40,7 +40,6 @@ from PyQt5 import QtCore
 from AcquisitionBase import AcquisitionBase
 
 
-
 class SimpleAcquisition(AcquisitionBase):
     '''
     SimpleAcquisition is a thin wrapper around AcquisitionBase that provides
@@ -64,6 +63,17 @@ class SimpleAcquisition(AcquisitionBase):
             self.triggerTimer.start(500)
 
 
+def exitHandler(a,b=None):
+    '''
+    exitHandler is called when CTRL-c is pressed within the console
+    running the server for Windows systems
+    '''
+    print("CTRL-C detected. Shutting down...")
+    acquisition.StopAcquisition(exit_app=True)
+
+    return True
+
+
 def signal_handler(*args):
     '''
     signal_handler is called when ctrl-c is pressed when the python console
@@ -73,19 +83,22 @@ def signal_handler(*args):
     print("CTRL-C or SIGTERM/SIGHUP detected. Shutting down...")
     acquisition.StopAcquisition(exit_app=True)
 
+    return True
+
 
 if __name__ == "__main__":
     import sys
     import argparse
-    import signal
 
-    #  set up handlers to trap ctrl-c and (on linux) terminal close events
-    #  This allows the user to stop the application with ctrl-c and at
-    #  least on linux cleanly shut down when the terminal window is closed.
-    #  (Windows does not expose those signals)
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    if os.name != 'nt':
+    #  Since this is a console app, we want to catch
+    if sys.platform == "win32":
+        import win32api
+        win32api.SetConsoleCtrlHandler(exitHandler, True)
+    else:
+        #  On linux we can use signal
+        import signal
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
         signal.signal(signal.SIGHUP, signal_handler)
 
     #  set the default application config file path

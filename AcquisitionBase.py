@@ -37,12 +37,16 @@ import sys
 import datetime
 import logging
 import functools
+import platform
 import collections
+import shutil
 #  import order seems to matter on linux. QtCore and QtSql (in metadata_db)
 #  have to be imported before (I think) cv2. If not you get a weird error
 #  loading a shared library when importing them.
 from PyQt5 import QtCore
+from pathlib import Path
 from metadata_db import metadata_db
+import google.protobuf
 import yaml
 import numpy as np
 import cv2
@@ -95,6 +99,7 @@ class AcquisitionBase(QtCore.QObject):
     stopAcquiring = QtCore.pyqtSignal(list)
     startAcquiring = QtCore.pyqtSignal((list, str, bool, dict, bool, dict))
     trigger = QtCore.pyqtSignal(list, int, datetime.datetime, bool, bool)
+    stopServer = QtCore.pyqtSignal()
 
     #  parameterChanged is used to respond to Get and SetParam
     #  requests from CamtrawlServer
@@ -200,6 +205,8 @@ class AcquisitionBase(QtCore.QObject):
         '''AcquisitionSetup reads the configuration files, creates the log file,
         opens up the metadata database, and sets up the cameras.
         '''
+        #  bump the prompt
+        print()
 
         #  get the application start time
         start_time_string = datetime.datetime.now().strftime("D%Y%m%d-T%H%M%S")
@@ -224,9 +231,10 @@ class AcquisitionBase(QtCore.QObject):
             self.base_dir = os.path.normpath(self.configuration['application']['output_path'] +
                     os.sep + start_time_string)
 
-        #  create the paths to our logs and images directories
+        #  create the paths to our logs, images, and settings directories
         self.log_dir = os.path.normpath(self.base_dir + os.sep + 'logs')
         self.image_dir = os.path.normpath(self.base_dir + os.sep + 'images')
+        settings_dir = os.path.normpath(self.base_dir + os.sep + 'settings')
 
         #  set up logging
         try:
@@ -267,8 +275,45 @@ class AcquisitionBase(QtCore.QObject):
             QtCore.QCoreApplication.instance().quit()
             return
 
+        #  copy the settings files - we do this so we have a copy of the settings
+        #  for each deployment.
+        try:
+            #  make sure we have a settings directory. Assume that if the
+            #  settings folder exists, we have already copied the files.
+            if not os.path.exists(settings_dir):
+                os.makedirs(settings_dir)
+
+                #  copy the settings and profiles files
+                shutil.copy2(self.config_file, settings_dir)
+                shutil.copy2(self.profiles_file, settings_dir)
+        except:
+            #  we failed to copy the settings?
+            self.logger.warning("Unable to copy settings files to " + settings_dir)
+
         #  log file is set up and directories created. Get some basic info into the logs
         self.logger.info("Camtrawl Acquisition Starting...")
+
+        try:
+            #  set up the camera interface
+            self.system = PySpin.System.GetInstance()
+        except:
+            #  if we can't create the logging dir we bail
+            self.logger.critical("Error obtaining PySpin system instance. Have you installed the " +
+                    "Spinnaker SDK and PySpin correctly?")
+            self.logger.critical("Application exiting...")
+            QtCore.QCoreApplication.instance().quit()
+            return
+
+        #  report versions
+        self.logger.info('Platform: %s %s' % (platform.system(), platform.release()))
+        self.logger.info('Python version: %s' % (sys.version))
+        self.logger.info('Numpy version: %s' % (np.__version__))
+        self.logger.info('OpenCV version: %s' % (cv2.__version__))
+        self.logger.info('protobuf version: %s' % (google.protobuf.__version__))
+        self.logger.info('PyQt5 version: %s' % (QtCore.QT_VERSION_STR))
+        version = self.system.GetLibraryVersion()
+        self.logger.info('Spinnaker/PySpin library version: %d.%d.%d.%d' % (version.major,
+                version.minor, version.type, version.build))
         self.logger.info("CamtrawlAcquisition version: " + self.VERSION)
 
         #  note the config files we loaded
@@ -279,18 +324,16 @@ class AcquisitionBase(QtCore.QObject):
         #  open/create the image metadata database file
         self.OpenDatabase()
 
-        #  report versions
-        self.logger.info('Python version: %s' % (sys.version))
-        self.logger.info('Numpy version: %s' % (np.__version__))
-        self.logger.info('OpenCV version: %s' % (cv2.__version__))
-        self.logger.info('PyQt5 version: %s' % (QtCore.QT_VERSION_STR))
-
         #  configure the cameras...
         ok = self.ConfigureCameras()
 
         if ok:
             #  the cameras are ready to acquire. Set the isAcquiring property
             self.isAcquiring = True
+
+            #  start the server, if enabled
+            if self.configuration['server']['start_server']:
+                self.StartServer()
 
         else:
             #  we were unable to find any cameras
@@ -334,12 +377,6 @@ class AcquisitionBase(QtCore.QObject):
         self.controller_port = {}
         self.hw_triggered_cameras = []
         self.hwTriggered = False
-
-        #  set up the camera interface
-        self.system = PySpin.System.GetInstance()
-        version = self.system.GetLibraryVersion()
-        self.logger.info('Spin library version: %d.%d.%d.%d' % (version.major,
-                version.minor, version.type, version.build))
 
         # Retrieve list of cameras from the system
         self.logger.info('Getting available cameras...')
@@ -415,7 +452,8 @@ class AcquisitionBase(QtCore.QObject):
                 #  add or update this camera in the database
                 if self.use_db:
                     self.db.update_camera(sc.camera_name, sc.device_info['DeviceID'], sc.camera_id,
-                            config['label'], config['rotation'])
+                            config['label'], config['rotation'], sc.device_info['DeviceVersion'],
+                            sc.device_info['DeviceCurrentSpeed'])
 
                 # Set the camera's label
                 sc.label = config['label']
@@ -582,6 +620,24 @@ class AcquisitionBase(QtCore.QObject):
         #  emit the trigger signal to trigger the cameras
         self.trigger.emit([], self.n_images, self.trig_time, True, True)
 
+        # TODO: Currently we only write a single entry in the sensor_data table for
+        #       HDR acquisition sequences because we're not incrementing the image
+        #       counter for each HDR frame. Since we're not incrementing the number
+        #       we don't have a unique key in the sensor_data table for the 3 other
+        #       HDR exposures. If we want to change this, the easiest approach would
+        #       be to use a decimal notation of image_number.HDR_exposure for the
+        #       image numbers. For example, 143.1, 143.2, 143.3, 143.4
+
+        #  and write synced sensor data  to the db
+        for sensor_id in self.sensorData:
+            for header in self.sensorData[sensor_id]:
+                #  check if the data is fresh
+                freshness = self.trig_time - self.sensorData[sensor_id][header]['time']
+                if freshness.seconds <= self.configuration['sensors']['synchronous_timeout']:
+                    #  it is fresh enough. Write it to the db
+                    self.db.add_imageinsert_sync_data(self.n_images, sensor_id, header,
+                            self.sensorData[sensor_id][header]['data'])
+
 
     @QtCore.pyqtSlot(str, str, dict)
     def CamImageAcquired(self, cam_name, cam_label, image_data):
@@ -599,13 +655,17 @@ class AcquisitionBase(QtCore.QObject):
             if self.use_db:
                 self.db.add_dropped(self.n_images, cam_name, self.trig_time)
         else:
-            #  we do have image data
+            #  we do have image data - we log this image to the images table
+
+            #  Only store the image file name, no path info
+            filename = Path(image_data['filename']).name
+
             if self.use_db:
-                self.db.add_image(self.n_images, cam_name, self.trig_time, image_data['filename'],
-                        image_data['exposure'])
+                self.db.add_image(self.n_images, cam_name, self.trig_time, filename,
+                        image_data['exposure'], image_data['gain'])
             log_str = (cam_name + ': Image Acquired: %dx%d  exp: %d  gain: %2.1f  filename: %s' %
                     (image_data['width'], image_data['height'], image_data['exposure'],
-                    image_data['gain'], image_data['filename']))
+                    image_data['gain'], filename))
         self.logger.debug(log_str)
 
         #  note that this camera has received (or timed out)
@@ -667,6 +727,16 @@ class AcquisitionBase(QtCore.QObject):
         '''
         #  log it.
         self.logger.debug(cam_name + ':DEBUG:' + debug_str)
+
+
+    @QtCore.pyqtSlot(str)
+    def LogServerError(self, error_str):
+        '''
+        The LogServerError slot is called when a CamtrawlServer runs into an error.
+        For now we just log the error and move on.
+        '''
+        #  log it.
+        self.logger.error('CamtrawlServer:ERROR:' + error_str)
 
 
     @QtCore.pyqtSlot(object, str, bool)
@@ -751,10 +821,14 @@ class AcquisitionBase(QtCore.QObject):
 
         self.logger.info("Acquisition is Stopping...")
 
-        #  if we're using
+        #  if we're using the database, close it
         if self.use_db and self.db.is_open:
             self.logger.debug("Closing the database...")
             self.db.close()
+
+        #  same with the server
+        if self.configuration['server']['start_server']:
+            self.stopServer.emit()
 
         #  we need to make sure we release all references to our SpinCamera
         #  objects so Spinnaker can clean up behind the scenes. If we don't
@@ -766,14 +840,14 @@ class AcquisitionBase(QtCore.QObject):
 
         #  wait just a bit to allow the Python GC to finish cleaning up.
         delayTimer = QtCore.QTimer(self)
-        delayTimer.timeout.connect(self.ApplicationTeardown2)
+        delayTimer.timeout.connect(self.AcqisitionTeardown2)
         delayTimer.setSingleShot(True)
         delayTimer.start(250)
 
 
-    def ApplicationTeardown2(self):
+    def AcqisitionTeardown2(self):
         '''
-        ApplicationTeardown2 is called to finish teardown. This last bit of cleanup
+        AcqisitionTeardown2 is called to finish teardown. This last bit of cleanup
         is triggered by a delay timer to give the Python GC a little time to finish
         cleaning up the references to the Spinnaker camera object.
         '''
@@ -805,7 +879,6 @@ class AcquisitionBase(QtCore.QObject):
                 #    camtrawl ALL=NOPASSWD: /usr/local/bin/delay_shutdown.sh
                 #    camtrawl ALL=NOPASSWD: /sbin/shutdown.sh
                 os.system("sudo /usr/local/bin/delay_shutdown.sh &")
-
 
         self.logger.info("Acquisition Stopped.")
         self.logger.info("Application exiting...")
@@ -851,7 +924,6 @@ class AcquisitionBase(QtCore.QObject):
         a command and control interface and serves up image and sensor data on the
         network. It can be used in conjunction with the Camtrawl client in applications
         for remote viewing and control of the system.
-
         '''
 
         self.logger.info("Opening Camtrawl server on  " +
@@ -863,11 +935,15 @@ class AcquisitionBase(QtCore.QObject):
                 self.configuration['server']['server_interface'],
                 self.configuration['server']['server_port'])
 
-        #  connect the server's signals
-        self.server.sensorData.connect(self.SensorDataAvailable)
-        #self.server.getParameterRequest.connect(self.ServerGetParamRequest)
-        #self.server.setParameterRequest.connect(self.ServerSetParamRequest)
-        #self.server.error.connect(self.serverError)
+        #  connect the server's signals. Connect both the sync and async signals
+        #  to the same method since we use our configuration file to figure out
+        #  how to log sensor data.
+        self.server.syncSensorData.connect(self.SensorDataAvailable)
+        self.server.asyncSensorData.connect(self.SensorDataAvailable)
+        self.server.getParameterRequest.connect(self.GetParameterRequest)
+        self.server.setParameterRequest.connect(self.SetParameterRequest)
+        self.server.error.connect(self.LogServerError)
+        self.stopServer.connect(self.server.stopServer)
 
         #  connect our signals to the server
         self.parameterChanged.connect(self.server.parameterDataAvailable)
@@ -976,6 +1052,71 @@ class AcquisitionBase(QtCore.QObject):
                 self.n_images = 1
             else:
                 self.n_images = max_num + 1
+
+
+    @QtCore.pyqtSlot(str, str)
+    def GetParameterRequest(self, module, parameter):
+
+        pass
+
+    @QtCore.pyqtSlot(str, str, str)
+    def SetParameterRequest(self, module, parameter, value):
+
+        pass
+
+
+    @QtCore.pyqtSlot(str, str, datetime.datetime, str)
+    def SensorDataAvailable(self, sensor_id, header, rx_time, data):
+        '''
+        The SensorDataAvailable slot is called when sensor data is received. Data
+        producers like the CamtrawlServer or CamtrawlController are connected to
+        this slot. If you add additional producers in a child class, you must
+        connect them to this slot.
+
+        CamtrawlAcquisition lumps sensor data into 2 groups. Synced sensor data
+        is cached when received and then logged to the database when the cameras
+        are triggered and the data are linked to the image. Async sensor data is
+        logged immediately and is not linked to any image.
+
+        Args:
+            sensor_id (str): A unique string defining the sensor. Sensors can
+                             have multiple data types, each defined by a unique
+                             header.
+            header (str): A string specifying the datagram header of this datagram.
+
+            rx_time (datetime): A datetime object defining the time the data was
+                                received or created by the producer.
+            data (str): A string containing the sensor data. The string is
+                        assumed to be in the form:
+                          <header>,<data>
+
+        Returns:
+            None
+        '''
+
+        #  determine if this data is synced or async
+        is_synchronous = self.default_is_synchronous
+        if header in self.configuration['sensors']['synchronous']:
+            is_synchronous = True
+        elif header in self.configuration['sensors']['asynchronous']:
+            is_synchronous = False
+
+        if is_synchronous:
+            #  this data should be cached to be written to the db when
+            #  the cameras are triggered
+
+            #  first check if we have an entry for this sensor
+            if sensor_id not in self.sensorData:
+                #  nope, add it
+                self.sensorData[sensor_id] = {}
+
+            #  add the data
+            self.sensorData[id][header] = {'time':rx_time, 'data':data}
+
+        else:
+            #  this is async sensor data so we just write it
+            if self.use_db:
+                self.db.insert_async_data(sensor_id, header, rx_time, data)
 
 
     def ReadConfig(self, config_file, config_dict):

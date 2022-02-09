@@ -24,11 +24,12 @@ class CamtrawlServer(QtCore.QObject):
     '''
 
     #  define CamtrawlServer signals
-    sensorData = QtCore.pyqtSignal(str, str, datetime.datetime, str)
+    syncSensorData = QtCore.pyqtSignal(str, str, datetime.datetime, str)
+    asyncSensorData = QtCore.pyqtSignal(str, str, datetime.datetime, str)
     getParameterRequest = QtCore.pyqtSignal(str, str)
     setParameterRequest = QtCore.pyqtSignal(str, str, str)
     serverClosed = QtCore.pyqtSignal()
-    error = QtCore.pyqtSignal(int,str)
+    error = QtCore.pyqtSignal(str)
 
 
     def __init__(self, local_address='127.0.0.1', local_port=7889, parent=None):
@@ -212,10 +213,17 @@ class CamtrawlServer(QtCore.QObject):
                             #  convert the timestamp to a datetime object
                             time_obj = datetime.datetime.fromtimestamp(sensor.timestamp)
 
-                            #  emit the sensor data signal
-                            self.sensorData.emit(sensor.id, sensor.header, time_obj, sensor.data)
-                            self.logger.debug("setSensorData request received: " + sensor.id + "," +
-                                    sensor.header + "," + sensor.data)
+                            #  emit the sensor data signal based on the sensor type
+                            if sensor.type == CamtrawlServer_pb2.sensorType.Value('ASYNC'):
+                                #  this data should be handled as async
+                                self.asyncSensorData.emit(sensor.id, sensor.header, time_obj, sensor.data)
+                                self.logger.debug("setSensorData async request received: " + sensor.id + "," +
+                                        sensor.header + "," + sensor.data)
+                            else:
+                                #  this data should be handled as synced
+                                self.syncSensorData.emit(sensor.id, sensor.header, time_obj, sensor.data)
+                                self.logger.debug("setSensorData synced request received: " + sensor.id + "," +
+                                        sensor.header + "," + sensor.data)
 
                     #  process a get parameter request
                     elif (request.type == CamtrawlServer_pb2.msg.msgType.Value('GETPARAMETER')):
@@ -476,7 +484,6 @@ class CamtrawlServer(QtCore.QObject):
         self.sensorData = {}
 
         self.serverClosed.emit()
-
 
 
     @QtCore.pyqtSlot(str, str, datetime.datetime, str)
