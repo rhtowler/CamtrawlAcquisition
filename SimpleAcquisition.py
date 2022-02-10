@@ -65,11 +65,15 @@ class SimpleAcquisition(AcquisitionBase):
 
 def exitHandler(a,b=None):
     '''
-    exitHandler is called when CTRL-c is pressed within the console
-    running the server for Windows systems
+    exitHandler is called when CTRL-c is pressed on Windows
     '''
-    print("CTRL-C detected. Shutting down...")
-    acquisition.StopAcquisition(exit_app=True)
+    global ctrlc_pressed
+
+    if not ctrlc_pressed:
+        #  make sure we only act on the first ctrl-c press
+        ctrlc_pressed = True
+        print("CTRL-C detected. Shutting down...")
+        acquisition.StopAcquisition(exit_app=True)
 
     return True
 
@@ -80,8 +84,13 @@ def signal_handler(*args):
     has focus. On Linux this is also called when the terminal window is closed
     or when the Python process gets the SIGTERM signal.
     '''
-    print("CTRL-C or SIGTERM/SIGHUP detected. Shutting down...")
-    acquisition.StopAcquisition(exit_app=True)
+    global ctrlc_pressed
+
+    if not ctrlc_pressed:
+        #  make sure we only act on the first ctrl-c press
+        ctrlc_pressed = True
+        print("CTRL-C or SIGTERM/SIGHUP detected. Shutting down...")
+        acquisition.StopAcquisition(exit_app=True)
 
     return True
 
@@ -90,12 +99,17 @@ if __name__ == "__main__":
     import sys
     import argparse
 
-    #  Since this is a console app, we want to catch
+    #  create a state variable to track if the user typed ctrl-c to exit
+    ctrlc_pressed = False
+
+    #  Set up the handlers to trap ctrl-c
     if sys.platform == "win32":
+        #  On Windows, we use win32api.SetConsoleCtrlHandler to catch ctrl-c
         import win32api
         win32api.SetConsoleCtrlHandler(exitHandler, True)
     else:
-        #  On linux we can use signal
+        #  On linux we can use signal to get not only ctrl-c, but
+        #  termination and hangup signals also.
         import signal
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)

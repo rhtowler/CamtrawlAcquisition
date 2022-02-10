@@ -1,45 +1,41 @@
 #!/usr/bin/env python3
+# coding=utf-8
+#
+#     National Oceanic and Atmospheric Administration (NOAA)
+#     Alaskan Fisheries Science Center (AFSC)
+#     Resource Assessment and Conservation Engineering (RACE)
+#     Midwater Assessment and Conservation Engineering (MACE)
+#
+#  THIS SOFTWARE AND ITS DOCUMENTATION ARE CONSIDERED TO BE IN THE PUBLIC DOMAIN
+#  AND THUS ARE AVAILABLE FOR UNRESTRICTED PUBLIC USE. THEY ARE FURNISHED "AS
+#  IS."  THE AUTHORS, THE UNITED STATES GOVERNMENT, ITS INSTRUMENTALITIES,
+#  OFFICERS, EMPLOYEES, AND AGENTS MAKE NO WARRANTY, EXPRESS OR IMPLIED,
+#  AS TO THE USEFULNESS OF THE SOFTWARE AND DOCUMENTATION FOR ANY PURPOSE.
+#  THEY ASSUME NO RESPONSIBILITY (1) FOR THE USE OF THE SOFTWARE AND
+#  DOCUMENTATION; OR (2) TO PROVIDE TECHNICAL SUPPORT TO USERS.
+#
+"""
+.. module:: CamtrawlAcquisition.CamtrawlClientExample
 
-'''
-ClientExample is a simple example of using the Camtrawl server client.
+    :synopsis: CamtrawlClientExample is a simple example of using
+               the Camtrawl client to request and display images
+               being collected by a running Camtrawl system.
+    system
 
-CamtrawlAcquisition is the application that runs when the camera system boots.
-This application reads a configuration file, discovers and configures the
-cameras, creates a nested set of directories to store data, then triggers
-the cameras and saves the images to disk. While doing this, it also logs
-parameters and data from various sensors to a metadata database.
-
-The CamtrawlAcquisition application also provides a simple request/response
-server that provides access to the most recent image and sensor data and
-also provides basic system control. For purposes of this example we will
-focus on getting images and setting metadata.
-
-This example will use the CamtrawlClient module to connect to the server
-and request and display images from the attached cameras.
-
-If you do not have a live system to connect to, you can use ImageServerSim.py
-to serve up data from a previously recorded deployment.
-
-See the BOTTOM of the script for options.
+| Developed by:  Rick Towler   <rick.towler@noaa.gov>
+| National Oceanic and Atmospheric Administration (NOAA)
+| National Marine Fisheries Service (NMFS)
+| Alaska Fisheries Science Center (AFSC)
+| Midwater Assesment and Conservation Engineering Group (MACE)
+|
+| Author:
+|       Rick Towler   <rick.towler@noaa.gov>
+| Maintained by:
+|       Rick Towler   <rick.towler@noaa.gov>
+"""
 
 
-The following Python packages are required:
-
-numpy
-OpenCV 4.x
-PyQt5
-protobuf
-
-This software was written and tested using the following software packages:
-
-Python 3.7.2 [MSC v.1916 64 bit (AMD64)]
-numpy 1.16.2
-OpenCV 4.1.2
-PyQt 5.12.1
-protobuf 3.7.0
-
-'''
-
+import sys
 import logging
 import datetime
 import cv2
@@ -47,14 +43,27 @@ from CamtrawlServer import CamtrawlClient
 from PyQt5 import QtCore
 
 class CamtrawlClientExample(QtCore.QObject):
+    '''
+    CamtrawlClientExample is a simple example of using the Camtrawl client
+    to request and display images being collected by a running Camtrawl
+    system. If you do not have a live system to connect to, you can use
+    CamtrawlServerSim.py to serve up data from a previously recorded deployment.
 
-    def __init__(self, host, port):
+    See the BOTTOM of the script for options.
+    '''
+
+    def __init__(self, host, port, compressed, scale, quality):
 
         super(CamtrawlClientExample, self).__init__()
 
         #  store the server's host and port info
         self.host = str(host)
         self.port = int(port)
+
+        #  store the image request parameters
+        self.compressed = compressed
+        self.scale = scale
+        self.quality = quality
 
         #  create an instance of our CamtrawlClient and connect its signals
         self.client = CamtrawlClient.CamtrawlClient()
@@ -112,7 +121,15 @@ class CamtrawlClientExample(QtCore.QObject):
         '''
 
         #  connect to the server - the client will emit the connected signal when it's connected.
+        self.logger.debug("Connecting to server %s:%i" % (self.host, self.port))
         self.client.connectToServer(self.host, self.port)
+
+
+    def disconnectFromServer(self):
+        '''
+        disconnectFromServer disconnects the client from the server.
+        '''
+        self.client.disconnectFromServer()
 
 
     @QtCore.pyqtSlot(str, str, dict)
@@ -147,7 +164,6 @@ class CamtrawlClientExample(QtCore.QObject):
                             is BGR and suitable for use with OpenCV but may need to be
                             converted before using with other image processing libraries.
         '''
-
 
         #  In this example we're simply going to display images as they are received.
 
@@ -193,7 +209,8 @@ class CamtrawlClientExample(QtCore.QObject):
         #  can set the scale from 1-100 to scale the image before sending to
         #  further reduce bandwidth requirements. It is also worth scaling if you
         #  plan to scale as part of your image processing.
-        self.client.getImage(camera, compressed=False, scale=100, quality=80)
+        self.client.getImage(camera, compressed=self.compressed, scale=self.scale,
+                quality=self.quality)
 
 
     @QtCore.pyqtSlot(str, str, datetime.datetime, str)
@@ -231,12 +248,13 @@ class CamtrawlClientExample(QtCore.QObject):
         self.logger.debug("Connected to the server. Requesting images...")
 
         #  now request images from all of the cameras
-        self.client.getImage(self.client.cameras.keys(), compressed=True,
-                scale=100, quality=80)
+        self.client.getImage(self.client.cameras.keys(), compressed=self.compressed,
+                scale=self.scale, quality=self.quality)
 
 
     @QtCore.pyqtSlot()
     def disconnected(self):
+        self.logger.debug("Disconnected from the server. Shutting down...")
         cv2.destroyAllWindows()
         QtCore.QCoreApplication.instance().quit()
 
@@ -258,28 +276,88 @@ class CamtrawlClientExample(QtCore.QObject):
         QtCore.QCoreApplication.instance().quit()
 
 
+def exitHandler(a,b=None):
+    '''
+    exitHandler is called when CTRL-c is pressed on Windows
+    '''
+    global ctrlc_pressed
+
+    if not ctrlc_pressed:
+        #  make sure we only act on the first ctrl-c press
+        ctrlc_pressed = True
+        print("CTRL-C detected. Shutting down...")
+        client.disconnectFromServer()
+
+    return True
+
+
+def signal_handler(*args):
+    '''
+    signal_handler is called when ctrl-c is pressed when the python console
+    has focus. On Linux this is also called when the terminal window is closed
+    or when the Python process gets the SIGTERM signal.
+    '''
+    global ctrlc_pressed
+
+    if not ctrlc_pressed:
+        #  make sure we only act on the first ctrl-c press
+        ctrlc_pressed = True
+        print("CTRL-C or SIGTERM/SIGHUP detected. Shutting down...")
+        client.disconnectFromServer()
+
+    return True
 
 
 if __name__ == "__main__":
 
-    import sys
+    # =====================================================================
 
     #  set to the server host IP - if you're running this on the same machine
     #  as CamtrawlAcquisition or ImageServerSim set it to the loopback address.
     #  Otherwise specify the IP of the computer running one of those applications.
-    #host = '192.168.0.159'
-    host = '127.0.0.1'
+    host = '192.168.0.200'
+    #host = '127.0.0.1'
 
     #  set to the server port - the default port for the server is 7889 and it is
     #  set in the CamtrawlAcquisition .ini file.
     port = 7889
 
+    #  Set Compressed to True to have the server encode the image data to JPEG
+    #  before transmission. This significantly reduces bandwidth requirements
+    #  while increasing CPU requirements.
+    compressed = False
+
+    #  Set scale to a value between 1-100. For values less than 100, the server
+    #  will reduce the size of the images before sending.
+    scale = 60
+
+    #  If compressed is set to True, this specifies the JPEG quality value. Set
+    #  it to a value between 50-95. If compressed is False, this value is ignored.
+    quality=80
+
+    # =====================================================================
+
+    #  create a state variable to track if the user typed ctrl-c to exit
+    ctrlc_pressed = False
+
+    #  Set up the handlers to trap ctrl-c
+    if sys.platform == "win32":
+        #  On Windows, we use win32api.SetConsoleCtrlHandler to catch ctrl-c
+        import win32api
+        win32api.SetConsoleCtrlHandler(exitHandler, True)
+    else:
+        #  On linux we can use signal to get not only ctrl-c, but
+        #  termination and hangup signals also.
+        import signal
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGHUP, signal_handler)
 
     #  create an instance of QCoreApplication
     app = QtCore.QCoreApplication(sys.argv)
 
     #  create an instance of our example class
-    form = CamtrawlClientExample(host, port)
+    client = CamtrawlClientExample(host, port, compressed, scale, quality)
 
     #  and run
     sys.exit(app.exec_())

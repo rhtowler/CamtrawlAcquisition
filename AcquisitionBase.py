@@ -570,8 +570,13 @@ class AcquisitionBase(QtCore.QObject):
                     self.logger.info('    %s: Saving video as %s  Video profile: %s' % (sc.camera_name,
                             video_profile['file_ext'], config['video_preset']))
 
-                self.logger.info('    %s: Image data will be written to: %s' % (sc.camera_name,
-                            self.image_dir + os.sep + sc.camera_name))
+                #  issue a warning if a camera is not saving any image data
+                if config['save_video'] or config['save_stills']:
+                    self.logger.info('    %s: Image data will be written to: %s' % (sc.camera_name,
+                                self.image_dir + os.sep + sc.camera_name))
+                else:
+                    self.logger.warning('    %s: WARNING: Both video and still saving is disabled. ' %
+                            (sc.camera_name) + 'NO IMAGE DATA WILL BE RECORDED')
 
                 #  emit the startAcquiring signal to start the cameras
                 self.startAcquiring.emit([sc], self.image_dir, config['save_stills'],
@@ -828,6 +833,7 @@ class AcquisitionBase(QtCore.QObject):
 
         #  same with the server
         if self.configuration['server']['start_server']:
+            self.logger.debug("Closing the server...")
             self.stopServer.emit()
 
         #  we need to make sure we release all references to our SpinCamera
@@ -842,7 +848,7 @@ class AcquisitionBase(QtCore.QObject):
         delayTimer = QtCore.QTimer(self)
         delayTimer.timeout.connect(self.AcqisitionTeardown2)
         delayTimer.setSingleShot(True)
-        delayTimer.start(250)
+        delayTimer.start(500)
 
 
     def AcqisitionTeardown2(self):
@@ -938,8 +944,7 @@ class AcquisitionBase(QtCore.QObject):
         #  connect the server's signals. Connect both the sync and async signals
         #  to the same method since we use our configuration file to figure out
         #  how to log sensor data.
-        self.server.syncSensorData.connect(self.SensorDataAvailable)
-        self.server.asyncSensorData.connect(self.SensorDataAvailable)
+        self.server.sensorData.connect(self.SensorDataAvailable)
         self.server.getParameterRequest.connect(self.GetParameterRequest)
         self.server.setParameterRequest.connect(self.SetParameterRequest)
         self.server.error.connect(self.LogServerError)
@@ -1068,15 +1073,14 @@ class AcquisitionBase(QtCore.QObject):
     @QtCore.pyqtSlot(str, str, datetime.datetime, str)
     def SensorDataAvailable(self, sensor_id, header, rx_time, data):
         '''
-        The SensorDataAvailable slot is called when sensor data is received. Data
-        producers like the CamtrawlServer or CamtrawlController are connected to
-        this slot. If you add additional producers in a child class, you must
-        connect them to this slot.
+        The SensorDataAvailable slot is called when sensor data is received.
+
 
         CamtrawlAcquisition lumps sensor data into 2 groups. Synced sensor data
         is cached when received and then logged to the database when the cameras
         are triggered and the data are linked to the image. Async sensor data is
-        logged immediately and is not linked to any image.
+        logged immediately and is not linked to any image. You configure sensor
+        specifics in the "sensor" section of the configuration file.
 
         Args:
             sensor_id (str): A unique string defining the sensor. Sensors can

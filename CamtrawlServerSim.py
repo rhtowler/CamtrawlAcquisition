@@ -1,48 +1,42 @@
 #!/usr/bin/env python3
-'''
-ImageServerSim simulates the Camtrawl acquisition server. It reads data
-from a Camtrawl deployment folder and serves up images at a specified
-rate. This can be used to develop and test applications that interact
-with the CamtrawlServer to process data from and/or control a Camtrawl
-system. At this time it only implements the GetCameraInfo, GetImage and
-GetSensor messages. Calls to the client SetData and SetParameter methods
-will only generate text in the simulator's console and will not actually
-insert data into the metadata database or set any operational parameters.
+# coding=utf-8
+#
+#     National Oceanic and Atmospheric Administration (NOAA)
+#     Alaskan Fisheries Science Center (AFSC)
+#     Resource Assessment and Conservation Engineering (RACE)
+#     Midwater Assessment and Conservation Engineering (MACE)
+#
+#  THIS SOFTWARE AND ITS DOCUMENTATION ARE CONSIDERED TO BE IN THE PUBLIC DOMAIN
+#  AND THUS ARE AVAILABLE FOR UNRESTRICTED PUBLIC USE. THEY ARE FURNISHED "AS
+#  IS."  THE AUTHORS, THE UNITED STATES GOVERNMENT, ITS INSTRUMENTALITIES,
+#  OFFICERS, EMPLOYEES, AND AGENTS MAKE NO WARRANTY, EXPRESS OR IMPLIED,
+#  AS TO THE USEFULNESS OF THE SOFTWARE AND DOCUMENTATION FOR ANY PURPOSE.
+#  THEY ASSUME NO RESPONSIBILITY (1) FOR THE USE OF THE SOFTWARE AND
+#  DOCUMENTATION; OR (2) TO PROVIDE TECHNICAL SUPPORT TO USERS.
+#
+"""
+.. module:: CamtrawlAcquisition.CamtrawlServerSim
+
+    :synopsis: CamtrawlServerSim simulates the CamtrawlAcquisition
+               server. It reads data from a Camtrawl deployment folder
+               and serves up images at a specified rate.
+
+| Developed by:  Rick Towler   <rick.towler@noaa.gov>
+| National Oceanic and Atmospheric Administration (NOAA)
+| National Marine Fisheries Service (NMFS)
+| Alaska Fisheries Science Center (AFSC)
+| Midwater Assesment and Conservation Engineering Group (MACE)
+|
+| Author:
+|       Rick Towler   <rick.towler@noaa.gov>
+| Maintained by:
+|       Rick Towler   <rick.towler@noaa.gov>
+"""
 
 
-The Camtrawl acquisition server uses a simple request/response interface
-to provide image and sensor data over a network. The server holds copies
-of the most recent images and sensor data acquired and sends them upon
-request to clients.
-
-If an image request is received after the last image was sent but before
-a new image is available, the server will wait to send the image until
-the new image is available. Only the most recent request is queued.
-When multiple requests are sent for a single camera, only the newest
-request will be responded to. In practice, you should not request a new
-image until you have received the previous image and requesting an
-image from a camera/cameras more than once may result in skipped images.
-
-See the BOTTOM of the script for options.
-
-The following Python packages are required:
-
-numpy
-OpenCV 4.x
-PyQt5
-protobuf
-pywin32 (on windows systems)
-
-This software was written and tested using the following software packages:
-
-Python 3.7.2 [MSC v.1916 64 bit (AMD64)]
-numpy 1.16.2
-OpenCV 4.1.2
-PyQt 5.12.1
-protobuf 3.7.0
 
 
-'''
+
 
 from PyQt5 import QtCore
 import logging
@@ -56,14 +50,23 @@ import CamTrawlMetadata
 
 
 class CamtrawlServerSim(QtCore.QObject):
+    '''
+    CamtrawlServerSim simulates the CamtrawlAcquisition server. It reads data
+    from a Camtrawl deployment folder and serves up images at a specified
+    rate. This can be used to develop and test applications that interact
+    with the CamtrawlServer to process data from and/or control a Camtrawl
+    system. At this time it only implements the GetCameraInfo, GetImage and
+    GetSensor messages. Calls to the client SetData and SetParameter methods
+    will only generate text in the simulator's console and will not actually
+    insert data into the metadata database or set any operational parameters.
 
-    #  define a signal to indicate an external shutdown command was received
+    See the BOTTOM of the script for options.
+
+    '''
+
+    #  define our signals
     exShutdown = QtCore.pyqtSignal()
-
-    #  parameterChanged is used to respond to Get and SetParam
-    #  requests from CamtrawlServer
     parameterChanged = QtCore.pyqtSignal(str, str, str, bool, str)
-
     stopServer = QtCore.pyqtSignal()
     newImageAvailable = QtCore.pyqtSignal(str, str, dict)
 
@@ -119,7 +122,10 @@ class CamtrawlServerSim(QtCore.QObject):
     @QtCore.pyqtSlot()
     def startServer(self):
 
+        #  bump the prompt
         print()
+
+        #  get the ball rolling...
         logging.info('Starting CamtrawlServerSim with deployment ' + self.deploymentDir)
         logging.info('Start Delay: ' + str(self.startDelay) + " seconds")
         logging.info('Replay time scalar: ' + str(self.timeScalar))
@@ -137,6 +143,7 @@ class CamtrawlServerSim(QtCore.QObject):
         #  create a numpy array of image intervals in ms
         imageTimes = np.array(list(self.metadata.sensorData['time'].values()),
                 dtype='datetime64')
+        #  get the intervals in us and add back element 0 (removed by diff)
         self.intervals = np.diff(imageTimes)
         self.intervals = np.insert(self.intervals, 0, self.intervals[0])
         #  convert from us to ms
@@ -166,8 +173,7 @@ class CamtrawlServerSim(QtCore.QObject):
         self.server = CamtrawlServer(self.localAddress, self.localPort)
 
         #  connect the server's signals
-        self.server.syncSensorData.connect(self.rxSyncSensorData)
-        self.server.asyncSensorData.connect(self.rxAsyncSensorData)
+        self.server.sensorData.connect(self.rxSensorData)
         self.server.getParameterRequest.connect(self.rxGetParameterRequest)
         self.server.setParameterRequest.connect(self.rxSetParameterRequest)
         self.server.error.connect(self.serverError)
@@ -209,12 +215,8 @@ class CamtrawlServerSim(QtCore.QObject):
     #  anything more is beyond the scope of this example
 
     @QtCore.pyqtSlot(str, str, datetime.datetime, str)
-    def rxSyncSensorData(self, id, header, timeObj, data):
-        logging.info("Sync'd sensor data received from client: " + id + " ::: " + str(timeObj) + " ::: " + data)
-
-    @QtCore.pyqtSlot(str, str, datetime.datetime, str)
-    def rxAsyncSensorData(self, id, header, timeObj, data):
-        logging.info("Async sensor data received from client: " + id + " ::: " + str(timeObj) + " ::: " + data)
+    def rxSensorData(self, id, header, timeObj, data):
+        logging.info("Sensor data received from client: " + id + " ::: " + str(timeObj) + " ::: " + data)
 
     @QtCore.pyqtSlot(str, str)
     def rxGetParameterRequest(self, module, parameter):
@@ -345,28 +347,39 @@ class CamtrawlServerSim(QtCore.QObject):
 
 def exitHandler(a,b=None):
     '''
-    exitHandler is called when CTRL-c is pressed within the console
-    running the server for Windows systems
+    exitHandler is called when CTRL-c is pressed on Windows
     '''
-    print("CTRL-C detected. Shutting down...")
-    server.emitShutdown()
+    global ctrlc_pressed
+
+    if not ctrlc_pressed:
+        #  make sure we only act on the first ctrl-c press
+        ctrlc_pressed = True
+        print("CTRL-C detected. Shutting down...")
+        server.emitShutdown()
 
     return True
 
 
 def signal_handler(*args):
     '''
-    signal_handler is called on Linux machines when ctrl-c is pressed when the
-    python console has focus or when the terminal window is closed or when
-    the Python process gets the SIGTERM signal.
+    signal_handler is called when ctrl-c is pressed when the python console
+    has focus. On Linux this is also called when the terminal window is closed
+    or when the Python process gets the SIGTERM signal.
     '''
-    print("CTRL-C or SIGTERM/SIGHUP detected. Shutting down...")
-    server.emitShutdown()
+    global ctrlc_pressed
+
+    if not ctrlc_pressed:
+        #  make sure we only act on the first ctrl-c press
+        ctrlc_pressed = True
+        print("CTRL-C or SIGTERM/SIGHUP detected. Shutting down...")
+        server.emitShutdown()
 
     return True
 
 
 if __name__ == "__main__":
+
+    # =====================================================================
 
     #  path to the deployment folder
     deploymentDir = 'C:/Users/rick.towler/Desktop/D20200309-T012051'
@@ -400,6 +413,24 @@ if __name__ == "__main__":
     #  be image # 1.
     startFrame = 1
 
+    # =====================================================================
+
+    #  create a state variable to track if the user typed ctrl-c to exit
+    ctrlc_pressed = False
+
+    #  Set up the handlers to trap ctrl-c
+    if sys.platform == "win32":
+        #  On Windows, we use win32api.SetConsoleCtrlHandler to catch ctrl-c
+        import win32api
+        win32api.SetConsoleCtrlHandler(exitHandler, True)
+    else:
+        #  On linux we can use signal to get not only ctrl-c, but
+        #  termination and hangup signals also.
+        import signal
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGHUP, signal_handler)
+
     #  create an application instance
     app = QtCore.QCoreApplication(sys.argv)
 
@@ -407,17 +438,6 @@ if __name__ == "__main__":
     server = CamtrawlServerSim(deploymentDir, localAddress, localPort,
             repeat=repeat, startDelay=startDelay, startFrame=startFrame,
             timeScalar=timeScalar)
-
-    #  install a handler to catch ctrl-C on windows
-    if sys.platform == "win32":
-        import win32api
-        win32api.SetConsoleCtrlHandler(exitHandler, True)
-    else:
-        #  On linux we can use signal
-        import signal
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
-        signal.signal(signal.SIGHUP, signal_handler)
 
     #  start event processing
     sys.exit(app.exec_())

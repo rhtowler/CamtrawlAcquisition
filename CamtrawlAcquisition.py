@@ -405,28 +405,56 @@ class CamtrawlAcquisition(AcquisitionBase):
                     self.ctcTriggerChannel[0], self.ctcTriggerChannel[1])
 
 
+def exitHandler(a,b=None):
+    '''
+    exitHandler is called when CTRL-c is pressed on Windows
+    '''
+    global ctrlc_pressed
+
+    if not ctrlc_pressed:
+        #  make sure we only act on the first ctrl-c press
+        ctrlc_pressed = True
+        print("CTRL-C detected. Shutting down...")
+        acquisition.StopAcquisition(exit_app=True)
+
+    return True
+
+
 def signal_handler(*args):
     '''
     signal_handler is called when ctrl-c is pressed when the python console
     has focus. On Linux this is also called when the terminal window is closed
     or when the Python process gets the SIGTERM signal.
     '''
-    print("CTRL-C or SIGTERM/SIGHUP detected. Shutting down...")
-    acquisition.StopAcquisition(exit_app=True)
+    global ctrlc_pressed
+
+    if not ctrlc_pressed:
+        #  make sure we only act on the first ctrl-c press
+        ctrlc_pressed = True
+        print("CTRL-C or SIGTERM/SIGHUP detected. Shutting down...")
+        acquisition.StopAcquisition(exit_app=True)
+
+    return True
 
 
 if __name__ == "__main__":
     import sys
     import argparse
-    import signal
 
-    #  set up handlers to trap ctrl-c and (on linux) terminal close events
-    #  This allows the user to stop the application with ctrl-c and at
-    #  least on linux cleanly shut down when the terminal window is closed.
-    #  (Windows does not expose those signals)
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    if os.name != 'nt':
+    #  create a state variable to track if the user typed ctrl-c to exit
+    ctrlc_pressed = False
+
+    #  Set up the handlers to trap ctrl-c
+    if sys.platform == "win32":
+        #  On Windows, we use win32api.SetConsoleCtrlHandler to catch ctrl-c
+        import win32api
+        win32api.SetConsoleCtrlHandler(exitHandler, True)
+    else:
+        #  On linux we can use signal to get not only ctrl-c, but
+        #  termination and hangup signals also.
+        import signal
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
         signal.signal(signal.SIGHUP, signal_handler)
 
     #  set the default application config file path
