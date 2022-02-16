@@ -63,6 +63,7 @@ class CamtrawlAcquisition(AcquisitionBase):
         self.controllerStarting = False
         self.HWTriggerHDR = {}
         self.controller_port = {}
+        self.controllerCurrentState = 0
 
         # Add default config values for the controller and sensor integration
         # that CamtrawlAcquisition adds to AcquisitionBase.
@@ -72,7 +73,7 @@ class CamtrawlAcquisition(AcquisitionBase):
 
         self.configuration['controller']['use_controller'] = False
         self.configuration['controller']['serial_port'] = 'COM3'
-        self.configuration['controller']['baud_rate'] = 57600
+        self.configuration['controller']['baud_rate'] = 921600
         self.configuration['controller']['strobe_pre_fire'] = 150
 
         self.configuration['sensors']['default_type'] = 'synchronous'
@@ -114,7 +115,7 @@ class CamtrawlAcquisition(AcquisitionBase):
         '''
         self.logger.info("Connecting to Camtrawl controller on port: " +
                 self.configuration['controller']['serial_port'] + " baud: " +
-                self.configuration['controller']['baud_rate'])
+                str(self.configuration['controller']['baud_rate']))
 
         #  create an instance of CamtrawlController
         self.controller = CamtrawlController.CamtrawlController(serial_port=
@@ -122,7 +123,7 @@ class CamtrawlAcquisition(AcquisitionBase):
                 self.configuration['controller']['baud_rate'])
 
         #  connect its signals
-        self.controller.sensorDataAvailable.connect(self.SensorDataAvailable)
+        self.controller.sensorData.connect(self.SensorDataAvailable)
         self.controller.systemState.connect(self.ControllerStateChanged)
         self.controller.error.connect(self.ControllerError)
 
@@ -130,6 +131,7 @@ class CamtrawlAcquisition(AcquisitionBase):
         #  attribute so we know if we receive an error signal from the
         #  controller we know that the controller serial port could not be opened.
         self.controllerStarting = True
+        self.controllerCurrentState = 0
         self.controller.startController()
 
 
@@ -251,10 +253,12 @@ class CamtrawlAcquisition(AcquisitionBase):
             #  controller and we can't we consider this a fatal error and bail.
             self.logger.critical("Unable to connect to the Camtrawl controller @ port: "+
                 self.configuration['controller']['serial_port'] + " baud: " +
-                self.configuration['controller']['baud_rate'])
+                str(self.configuration['controller']['baud_rate']))
             self.logger.critical("    ERROR: " + error)
             print("Application exiting...")
-            QtCore.QCoreApplication.instance().quit()
+            #TODO: Need to clean up this exit path - there is still a thread
+            #      running when we exit here
+            self.StopAcquisition(exit_app=True)
             return
 
         #  log the serial error. Normally this will never get called.
@@ -302,6 +306,10 @@ class CamtrawlAcquisition(AcquisitionBase):
         AcqisitionTeardown is called when the application is shutting down.
         The cameras will have already been told to stop acquiring
         """
+        
+        #  stop the controller
+        self.controller.stopController()
+        
         # call the base class's AcqisitionTeardown method
         super().AcqisitionTeardown()
 
@@ -342,7 +350,7 @@ class CamtrawlAcquisition(AcquisitionBase):
         super().TriggerCameras()
 
 
-    @QtCore.pyqtSlot(object, list, bool)
+    @QtCore.pyqtSlot(object, int, bool)
     def HWTriggerReady(self, cam, exposure_us, is_HDR):
         '''
         The HWTriggerReady slot is called by each hardware triggered camera when it
@@ -362,12 +370,12 @@ class CamtrawlAcquisition(AcquisitionBase):
             #  one when indexing the list.
             self.ctcTriggerChannel[self.controller_port[cam] - 1] = True
 
-        #  track the longest hardware exposure - this ends up being our strobe exposure
+        #  track the longest camera exposure - this ends up being our strobe exposure
         if self.maxExposure < exposure_us:
             self.maxExposure = exposure_us
 
         #  if all of the HW triggered cameras are ready, we trigger them
-        if all(self.readyToTrigger):
+        if all(self.readyToTrigger.values()):
 
             #  strobe pre-fire is the time, in microseconds, that the strobe
             #  trigger signal goes high before the cameras are triggered. This
@@ -376,7 +384,7 @@ class CamtrawlAcquisition(AcquisitionBase):
             #  strobe pre fire for HDR exposures
 
             #  disable strobe pre-fire for HDR exposures 2,3 and 4
-            if any(self.HWTriggerHDR):
+            if any(self.HWTriggerHDR.values()):
                 strobePreFire = 0
             else:
                 #  not an HDR trigger so we use the configured pre-fire

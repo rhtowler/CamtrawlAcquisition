@@ -371,7 +371,7 @@ class SerialMonitor(QObject):
         #  get the name of the device that is shutting down
         deviceName = self.threads[thread].deviceName
 
-        print('Stopping ' + deviceName, '   Thread:', thread)
+        #print('Stopping ' + deviceName, '   Thread:', thread)
 
         #  update the thread
         self.devices[deviceName]['thread'] = None

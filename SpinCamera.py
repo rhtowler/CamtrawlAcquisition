@@ -95,7 +95,7 @@ class SpinCamera(QtCore.QObject):
     acquisitionStarted = QtCore.pyqtSignal(object, str, bool)
     stoppingAcquisition = QtCore.pyqtSignal()
     acquisitionStopped = QtCore.pyqtSignal(object, str, bool)
-    triggerReady = QtCore.pyqtSignal(object, list, bool)
+    triggerReady = QtCore.pyqtSignal(object, int, bool)
     triggerComplete = QtCore.pyqtSignal(object)
 
 

@@ -21,7 +21,8 @@ class CamtrawlController(QtCore.QObject):
     systemState = QtCore.pyqtSignal(int)
     txSerialData = QtCore.pyqtSignal(str, str)
     error = QtCore.pyqtSignal(str,str)
-    stopDevice = QtCore.pyqtSignal()
+    stopDevice = QtCore.pyqtSignal(list)
+    controllerStopped = QtCore.pyqtSignal()
 
 
     #  define the controller states
@@ -41,6 +42,9 @@ class CamtrawlController(QtCore.QObject):
         super(CamtrawlController, self).__init__(parent)
 
         self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.DEBUG)
+        
+        self.isRunning = False
 
         #  set the serial port poroperties
         self.deviceParams = {'deviceName':'CTControl',
@@ -51,8 +55,13 @@ class CamtrawlController(QtCore.QObject):
                              'parseIndex':0,
                              'pollRate':500,
                              'txRate':250,
+                             'initialState':(True,True),
+                             'cmdPrompt':'',
+                             'byteSize':8,
+                             'parity':'N',
+                             'stopBits':1,
+                             'flowControl':'NONE',
                              'thread':None}
-
 
 
     def startController(self):
@@ -63,11 +72,12 @@ class CamtrawlController(QtCore.QObject):
         self.serialDevice = SerialDevice.SerialDevice(self.deviceParams)
 
         #  connect the SerialDevice's signals
-        self.serialDevice.SerialDataReceived.connect(self.dataReceived)
+        self.serialDevice.SerialDataReceived.connect(self.sensorDataReceived)
         self.serialDevice.SerialError.connect(self.serialError)
 
         #  and connect our stop signal
         self.stopDevice.connect(self.serialDevice.stopPolling)
+        self.txSerialData.connect(self.serialDevice.write)
 
         #  create a thread to run the serial device
         self.deviceParams['thread'] = QtCore.QThread(self)
@@ -78,12 +88,13 @@ class CamtrawlController(QtCore.QObject):
         #  connect thread specific signals and slots - this facilitates starting,
         #  stopping, and deletion of the thread.
         self.deviceParams['thread'].started.connect(self.serialDevice.startPolling)
+        self.deviceParams['thread'].started.connect(self.controllerStarted)
         self.serialDevice.SerialPortClosed.connect(self.deviceParams['thread'].quit)
         self.deviceParams['thread'].finished.connect(self.threadFinished)
         self.deviceParams['thread'].finished.connect(self.deviceParams['thread'].deleteLater)
 
-        self.logger.debug("Starting CamtrawlController. Port: " + self.deviceParams['port'],
-                + "   Baud: " + self.deviceParams['baud'])
+        self.logger.debug("Starting CamtrawlController. Port: " + self.deviceParams['port'] +
+                "   Baud: " + str(self.deviceParams['baud']))
 
         #  queue up a controller state request - this will not be sent until
         #  the port is opened and starts polling.
@@ -91,6 +102,13 @@ class CamtrawlController(QtCore.QObject):
 
         #  and finally, start the thread - this will also start polling
         self.deviceParams['thread'].start()
+
+
+    def controllerStarted(self):
+        """
+        controllerStarted is called after the serial thread starts
+        """
+        self.isRunning = True
 
 
     def stopController(self):
@@ -290,16 +308,17 @@ class CamtrawlController(QtCore.QObject):
         strobe1Exp = int(round(strobe1Exp))
         strobe2Exp = int(round(strobe2Exp))
 
-        msg = ("trigger," + str(strobePreFire) +
-                "," + str(strobe1Exp) + "," + str(strobe2Exp) + "," +
-                + str(chanOneTrig) + "," + str(chanTwoTrig) + "\n")
+        msg = ("trigger," + str(strobePreFire) + "," + str(strobe1Exp) +
+                "," + str(strobe2Exp) + "," + str(chanOneTrig) +
+                "," + str(chanTwoTrig) + "\n")
 
+        print(msg)
         self.txSerialData.emit(self.deviceParams['deviceName'], msg)
 
         self.logger.debug("CamtrawlController sent: " + msg)
 
 
-    @QtCore.pyqtSlot(str, object, object)
+    @QtCore.pyqtSlot(str, str, object)
     def sensorDataReceived(self, sensorID, data, err):
         '''The sensorDataReceived slot is called when serial data is available
 
@@ -314,6 +333,7 @@ class CamtrawlController(QtCore.QObject):
         Returns:
             None
         '''
+
         #  here we process the various datagrams received from the controller.
         rxTime = datetime.datetime.now()
         dataBits = data.split(',')
@@ -328,15 +348,15 @@ class CamtrawlController(QtCore.QObject):
             self.sensorData.emit(sensorID, header, rxTime, data)
 
 
-    @QtCore.pyqtSlot(str, str)
-    def serialError(self, sensorID, errorMsg):
+    @QtCore.pyqtSlot(str, object)
+    def serialError(self, sensorID, errorObj):
 
         self.logger.error("CamtrawlControl serial error [" + self.deviceParams['port']
-                + "," + self.deviceParams['baud'] + ']:' + str(errorMsg))
-        self.logger.error("    " + str(errorMsg.parent))
+                + "," + str(self.deviceParams['baud']) + ']:' + str(errorObj.errText))
+        self.logger.error("    " + str(errorObj.parent))
 
         #  re-emit the error signal
-        self.error.emit('CamtrawlControl', errorMsg)
+        self.error.emit('CamtrawlControl', str(errorObj.errText))
 
 
     @QtCore.pyqtSlot()
@@ -348,6 +368,8 @@ class CamtrawlController(QtCore.QObject):
 
         #  discard our reference to the thread
         self.deviceParams['thread'] = None
+        self.isRunning = False
+        self.controllerStopped.emit()
 
         self.logger.debug("CamtrawlController stopped.")
 
