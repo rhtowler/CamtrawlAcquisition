@@ -157,6 +157,9 @@ class CamtrawlAcquisition(AcquisitionBase):
         #  so we can unset the controllerStarting state.
         if self.controllerStarting:
             self.controllerStarting = False
+            
+            #  next, tell the controller we're ready
+            self.controller.sendReadySignal()
 
 
         if self.controllerCurrentState == new_state:
@@ -369,6 +372,10 @@ class CamtrawlAcquisition(AcquisitionBase):
             #  The controller port numbering starts at 1 so we have to subtract
             #  one when indexing the list.
             self.ctcTriggerChannel[self.controller_port[cam] - 1] = True
+        else:
+            #  If this camera is not going to be triggered, we set self.received
+            #  for this camera to True so we don't wait for it.
+            self.received[cam.camera_name] = True
 
         #  track the longest camera exposure - this ends up being our strobe exposure
         if self.maxExposure < exposure_us:

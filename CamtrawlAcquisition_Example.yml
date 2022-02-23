@@ -209,6 +209,19 @@ cameras:
         # values: none, cw90, cw180, cw270, fliplr, flipud
         rotation:  None
 
+        # Specify the sensor binning. If supported by your camera, sensor binning allows you
+        # to combine adjacent pixels on the image sensor to increase the cameras sensitivity
+        # at the expense of resolution. The value specified here are the number of N x N
+        # that are combined. The upper limit will depend on your camera, but typical values are:
+        #
+        #    1 - no binning. Image is acquired at full resolution
+        #    2 - 2x2 binning for an image that is 1/4 the original size
+        #    4 - 4x4 binning for an image that is 1/16 the original size.
+        #
+        # Not all cameras support 4x4 binning. The value specified must be 1,2, or 4. Other
+        # values will result in sensor binning set to 1 (disabled)
+        sensor_binning: 1
+
         # Set trigger divider to control when this camera responds to a trigger signal.
         # When this value divides evenly into the total number of triggers, this camera
         # will be triggered.
@@ -235,10 +248,15 @@ cameras:
         # a specific format.
         still_image_extension: .jpg
 
+        # Set the still image divider to control when this camera saves stills. When this
+        # value divides evenly into the total number of triggers, this camera will save
+        # a still image.
+        still_image_divider: 1
+
         # If saving JPEG images, specify the JPEG quality setting (1-99). Lower values
         # create smaller files at the expense of image detail. Reasonable values range
         # between 70-95.
-        jpeg_quality: 90
+        jpeg_quality: 85
 
         # Set image_scale to a value used to scale the image before saving. The value is
         # a percent of the original size and the default value is 100 (unscaled).
@@ -263,6 +281,12 @@ cameras:
         # are happy with typical camera system acquisition rates so it can be changed here.
         # If this parameter is set to -1 or omitted, the system framerate will be used.
         video_force_framerate: -1
+
+        # Set the video frame divider to control when this camera saves a frame to the video
+        # file. When this value divides evenly into the total number of triggers, this camera
+        # will write the image to the video file.
+        video_frame_divider: 1
+
 
         # The following settings apply to High Dynamic Range (HDR) image collection. When HDR is
         # enabled, the camera will collect a sequence of exposures and optionally process and

@@ -64,7 +64,7 @@ class AcquisitionBase(QtCore.QObject):
                              'label':'Camera',
                              'rotation':'none',
                              'trigger_divider': 1,
-                             'save_image_divider': 1,
+                             'sensor_binning': 1,
                              'trigger_source': 'Software',
                              'controller_trigger_port': 1,
                              'hdr_enabled':False,
@@ -79,11 +79,13 @@ class AcquisitionBase(QtCore.QObject):
                              'hdr_tonemap_gamma': 2.0,
                              'save_stills': True,
                              'still_image_extension': '.jpg',
+                             'still_image_divider': 1,
                              'jpeg_quality': 90,
                              'image_scale': 100,
                              'save_video': False,
                              'video_preset': 'default',
                              'video_force_framerate': -1,
+                             'video_frame_divider': 1,
                              'video_scale': 100}
 
     #DEFAULT_VIDEO_PROFILE defines the default options for the 'default' video profile.
@@ -111,7 +113,7 @@ class AcquisitionBase(QtCore.QObject):
     #  specify the maximum number of times the application will attempt to open a
     #  metadata db file when running in combined mode and the original db file
     #  cannot be opened.
-    MAX_DB_ALTERNATES = 20
+    MAX_DB_ALTERNATES = 100
 
     def __init__(self, config_file=None, profiles_file=None, parent=None):
 
@@ -162,13 +164,6 @@ class AcquisitionBase(QtCore.QObject):
 
         self.configuration['acquisition']['trigger_rate'] = 5
         self.configuration['acquisition']['trigger_limit'] = -1
-        self.configuration['acquisition']['save_stills'] = True
-        self.configuration['acquisition']['still_image_extension'] = '.jpg'
-        self.configuration['acquisition']['jpeg_quality'] = 90
-        self.configuration['acquisition']['image_scale'] = 100
-        self.configuration['acquisition']['save_video'] = False
-        self.configuration['acquisition']['video_preset'] = 'default'
-        self.configuration['acquisition']['video_scale'] = 100
 
         self.configuration['server']['start_server'] = False
         self.configuration['server']['server_port'] = 7889
@@ -321,8 +316,19 @@ class AcquisitionBase(QtCore.QObject):
         self.logger.info("Profiles file loaded: " + self.profiles_file)
         self.logger.info("Logging data to: " + self.base_dir)
 
+        #  set the default_is_synchronous sensor data property
+        if self.configuration['sensors']['default_type'].lower in ['synchronous', 'syncd', 'sync']:
+            self.default_is_synchronous = True
+        else:
+            self.default_is_synchronous = False
+
         #  open/create the image metadata database file
         self.OpenDatabase()
+
+        #  log the acquisition rate and max image count
+        self.logger.info("Acquisition Rate: %d images/sec   Max image count: %d" %
+                (self.configuration['acquisition']['trigger_rate'],
+                self.configuration['acquisition']['trigger_limit']))
 
         #  configure the cameras...
         ok = self.ConfigureCameras()
@@ -458,11 +464,13 @@ class AcquisitionBase(QtCore.QObject):
                 # Set the camera's label
                 sc.label = config['label']
 
-                #  set the camera trigger dividers
-                sc.save_image_divider = config['save_image_divider']
+                #  set the camera trigger and saving dividers
+                sc.save_stills_divider = config['still_image_divider']
+                sc.save_video_divider = config['video_frame_divider']
                 sc.trigger_divider = config['trigger_divider']
-                self.logger.info('    %s: trigger divider: %d  save image divider: %d' %
-                        (sc.camera_name, sc.trigger_divider, sc.save_image_divider))
+                self.logger.info(('    %s: trigger divider: %d  save image divider: %d' +
+                        '  save frame divider: %d') % (sc.camera_name, sc.trigger_divider,
+                        sc.save_stills_divider, sc.save_video_divider))
 
                 #  set up triggering
                 if config['trigger_source'].lower() == 'hardware':
@@ -492,8 +500,14 @@ class AcquisitionBase(QtCore.QObject):
                 sc.set_gain(config['gain'])
                 sc.rotation = config['rotation']
                 self.logger.info('    %s: label: %s  gain: %d  exposure_us: %d  rotation:%s' %
-                        (sc.camera_name, config['label'], config['gain'], config['exposure_us'],
+                        (sc.camera_name, config['label'], sc.get_gain(), sc.get_exposure(),
                         config['rotation']))
+
+                #  set the sensor binning
+                sc.set_binning(config['sensor_binning'])
+                binning = sc.get_binning()
+                self.logger.info('    %s: Sensor binning set to %i x %i' %
+                        (sc.camera_name, binning, binning))
 
                 #  set up HDR if configured
                 if config['hdr_enabled']:
@@ -640,8 +654,8 @@ class AcquisitionBase(QtCore.QObject):
                 freshness = self.trig_time - self.sensorData[sensor_id][header]['time']
                 if freshness.seconds <= self.configuration['sensors']['synchronous_timeout']:
                     #  it is fresh enough. Write it to the db
-                    self.db.add_imageinsert_sync_data(self.n_images, sensor_id, header,
-                            self.sensorData[sensor_id][header]['data'])
+                    self.db.insert_sync_data(self.n_images, self.sensorData[sensor_id][header]['time'],
+                            sensor_id, header, self.sensorData[sensor_id][header]['data'])
 
 
     @QtCore.pyqtSlot(str, str, dict)
@@ -1115,7 +1129,7 @@ class AcquisitionBase(QtCore.QObject):
                 self.sensorData[sensor_id] = {}
 
             #  add the data
-            self.sensorData[id][header] = {'time':rx_time, 'data':data}
+            self.sensorData[sensor_id][header] = {'time':rx_time, 'data':data}
 
         else:
             #  this is async sensor data so we just write it

@@ -8,24 +8,25 @@ application:
 
     output_mode: separate
     output_path: /camtrawl/image_data
+    #output_path: C:/Camtrawl/data
     log_level: INFO
     always_trigger_at_start: True
     shut_down_on_exit:  False
 
-    
+
 acquisition:
 
     trigger_rate: 10
-    trigger_limit: 50
+    trigger_limit: 10000
 
-    
+
 server:
 
     start_server: True
     server_interface: 0.0.0.0
     server_port: 7889
 
-    
+
 controller:
 
     use_controller: True
@@ -47,34 +48,49 @@ cameras:
 
     # Here are some simple examples of camera specific settings.
     Chameleon3 CM3-U3-31S4M_16081034:
-        gain: 35
-        exposure_us: 1200
+        gain: 25
+        exposure_us: 1000
         label: right
         rotation:  None
-        trigger_divider: 2
-        save_image_divider: 1
+        trigger_divider: 1
         trigger_source: Hardware
         controller_trigger_port: 1
+        sensor_binning: 2
 
         save_stills: True
+        still_image_divider: 5
         still_image_extension: .jpg
         jpeg_quality: 90
         image_scale: 100
 
-    Chameleon3 CM3-U3-31S4C_16153944: 
-        gain: 35
-        exposure_us: 2000
+        save_video: True
+        video_preset: x264-fast
+        video_scale:  100
+        video_frame_divider: 1
+        video_force_framerate: -1
+
+
+    Chameleon3 CM3-U3-31S4C_16153944:
+        gain: 25
+        exposure_us: 1000
         label: left
         rotation:  None
-        trigger_divider: 1
-        save_image_divider: 1
+        trigger_divider: 5
         trigger_source: Hardware
         controller_trigger_port: 2
+        sensor_binning: 2
 
         save_stills: True
         still_image_extension: .jpg
-        jpeg_quality: 90
+        still_image_divider: 5
+        jpeg_quality: 80
         image_scale: 100
+
+        save_video: False
+        video_preset: x264-fast
+        video_scale:  100
+        video_frame_divider: 1
+        video_force_framerate: -1
 
     default:
         gain: 16
@@ -87,12 +103,14 @@ cameras:
 
         save_stills: True
         still_image_extension: .jpg
+        still_image_divider: 1
         jpeg_quality: 90
         image_scale: 100
 
         save_video: False
         video_preset: x264-fast
         video_scale:  100
+        video_frame_divider: 1
         video_force_framerate: -1
 
         hdr_enabled: False

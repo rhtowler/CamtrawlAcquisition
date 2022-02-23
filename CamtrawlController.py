@@ -248,13 +248,11 @@ class CamtrawlController(QtCore.QObject):
         self.logger.debug("CamtrawlController sent: " + msg)
 
 
-
     def getStartupVoltage(self):
 
         msg = "getStartupVoltage\n"
         self.txSerialData.emit(self.deviceParams['deviceName'], msg)
         self.logger.debug("CamtrawlController sent: " + msg)
-
 
 
     def getShutdownVoltage(self):
@@ -264,7 +262,6 @@ class CamtrawlController(QtCore.QObject):
         msg = "getShutdownVoltage\n"
         self.txSerialData.emit(self.deviceParams['deviceName'], msg)
         self.logger.debug("CamtrawlController sent: " + msg)
-
 
 
     def trigger(self, strobePreFire, strobe1Exp, strobe2Exp, chanOneTrig, chanTwoTrig):
@@ -312,7 +309,6 @@ class CamtrawlController(QtCore.QObject):
                 "," + str(strobe2Exp) + "," + str(chanOneTrig) +
                 "," + str(chanTwoTrig) + "\n")
 
-        print(msg)
         self.txSerialData.emit(self.deviceParams['deviceName'], msg)
 
         self.logger.debug("CamtrawlController sent: " + msg)

@@ -122,7 +122,8 @@ class SpinCamera(QtCore.QObject):
         self.date_format = "D%Y%m%d-T%H%M%S.%f"
         self.n_triggered = 0
         self.total_triggers = 0
-        self.save_image_divider = 1
+        self.save_stills_divider = 1
+        self.save_video_divider = 1
         self.trigger_divider = 1
         self.dbResponse = None
         self.label = 'camera'
@@ -322,8 +323,17 @@ class SpinCamera(QtCore.QObject):
         if not self.acquiring:
             return
 
+        #  reset the save still image and save video frame state vars
+        self.save_this_still = True
+        self.save_this_frame = True
+
         #  increment the internal trigger counter
         self.total_triggers += 1
+
+        #  set the trigger counter - this counter is used to track the
+        #  number of triggers in this collection event. This will always be
+        #  1 for standard acquisition and 4 for HDR acquisition.
+        self.n_triggered = 1
 
         #  check if we should trigger because of the divider
         if (self.total_triggers % self.trigger_divider) != 0:
@@ -343,11 +353,14 @@ class SpinCamera(QtCore.QObject):
                 self.triggerReady.emit(self, 0, False)
             return
 
-        #  lastly, check if we're supposed to save this image. This
+        #  Lastly, check if the save_image or save_video dividers
         #  will override the save_image value passed into this method.
-        if (self.total_triggers % self.save_image_divider) != 0:
-            #  nope, change save_image to False. We'll trigger but
-            #  we don't save the image(s)
+        if (self.total_triggers % self.save_stills_divider) != 0:
+            self.save_this_still = False
+        if (self.total_triggers % self.save_video_divider) != 0:
+            self.save_this_frame = False
+        #  If we're not saving either, unset save_image
+        if not self.save_this_frame and not self.save_this_still:
             save_image = False
 
         #  initialize some lists used to help us do what we do
@@ -418,10 +431,7 @@ class SpinCamera(QtCore.QObject):
             else:
                 self.save_image.append(False)
 
-        #  set the trigger counter - this counter is used to track the
-        #  number of triggers in this collection event. This will always be
-        #  1 for standard acquisition and 4 for HDR acquisition.
-        self.n_triggered = 1
+
 
         #  trigger the camera if we're using software triggering
         if (self.trigger_mode == PySpin.TriggerSource_Software):
@@ -479,9 +489,17 @@ class SpinCamera(QtCore.QObject):
 
         #  get the next image from the camera buffers
         image_data = self.get_image()
+
+        #  add some metadata to the image_data dict
         image_data['timestamp'] = self.trig_timestamp
         image_data['filename'] = self.filenames[idx]
         image_data['image_number'] = self.image_number
+
+        #  add the save_still and save_frame states - this is used exclusively
+        #  by the image_writer to determine if an image should be written as
+        #  an image file and/or a video frame.
+        image_data['save_still'] = self.save_this_still
+        image_data['save_frame'] = self.save_this_frame
 
         #  check if we got an image
         if (image_data['ok']):
@@ -551,6 +569,9 @@ class SpinCamera(QtCore.QObject):
         if (not self.hdr_enabled) or idx == 3:
 
             #  If we're in hdr mode, check if we're merging the image
+            #  TODO: The code below for merging these frames needs work. I got most of this
+            #        from a few OpenCV examples on the web but I don't get reasonable results
+            #        so I am obviously missing something.
             if self.save_hdr or self.emit_hdr:
 
                 #  merge the HDR exposures
@@ -623,13 +644,13 @@ class SpinCamera(QtCore.QObject):
                     self.saveImage.emit(self.camera_name, merged_image)
 
 
-            #  we are done with this trigger event
+            #  if we're here, we are done with this trigger event
             self.triggerComplete.emit(self)
             self.n_triggered = 0
 
 
-    def load_hdr_reponse(self, filename):
-        '''load_hdr_reponse loads a numpy file containing the camera sensor reposonse data
+    def load_hdr_response(self, filename):
+        '''load_hdr_response loads a numpy file containing the camera sensor response data
         which is used for certain HDR image fusion methods.
         '''
         #TODO Implement this feature
@@ -687,12 +708,51 @@ class SpinCamera(QtCore.QObject):
         return result
 
 
+    def set_binning(self, bin_value):
+
+        result = True
+
+        try:
+            #  set binning for values > 1 otherwise we disable binning (set it to 1)
+            if bin_value in [2,4,8,16]:
+                #  First need to disable auto exposure
+                if bin_value > self.cam.BinningVertical.GetMax():
+                    bin_value = self.cam.BinningVertical.GetMax()
+
+                #  set the vertical binning. On the Flir cameras I have, horizontal
+                #  binning is RO and is linked to vertical so you don't need to set
+                #  horizontal binning.
+                self.cam.BinningVertical.SetValue(bin_value)
+
+            else:
+                #  disable binning
+                self.cam.BinningVertical.SetValue(1)
+
+        except PySpin.SpinnakerException as ex:
+            self.error.emit(self.camera_name, 'Error: %s' % ex)
+            result = False
+
+        return result
+
+
+    def get_binning(self):
+
+        try:
+            binning = self.cam.BinningVertical.GetValue()
+
+        except PySpin.SpinnakerException as ex:
+            self.error.emit(self.camera_name, 'Error: %s' % ex)
+            binning = None
+
+        return binning
+
+
     def set_exposure(self, exposure_us):
 
         result = True
 
         try:
-            #  manual exposure for values > 0 otherwise we enable autoexposure
+            #  manual exposure for values > 0 otherwise we enable auto exposure
             if (exposure_us > 0):
                 #  First need to disable auto exposure
                 self.cam.ExposureAuto.SetValue(PySpin.ExposureAuto_Off)
@@ -714,12 +774,24 @@ class SpinCamera(QtCore.QObject):
         return result
 
 
+    def get_exposure(self):
+
+        try:
+            exposure_us = self.cam.ExposureTime.GetValue()
+
+        except PySpin.SpinnakerException as ex:
+            self.error.emit(self.camera_name, 'Error: %s' % ex)
+            exposure_us = None
+
+        return exposure_us
+
+
     def set_gain(self, gain):
 
         result = True
 
         try:
-            #  manual exposure for values > 0 otherwise we enable autoexposure
+            #  manual gain for values > 0 otherwise we enable auto gain
             if (gain > 0):
 
                 if self.cam.GainAuto.GetAccessMode() != PySpin.RW:
@@ -752,6 +824,18 @@ class SpinCamera(QtCore.QObject):
             result = False
 
         return result
+
+
+    def get_gain(self):
+
+        try:
+            gain = self.cam.Gain.GetValue()
+
+        except PySpin.SpinnakerException as ex:
+            self.error.emit(self.camera_name, 'Error: %s' % ex)
+            gain = None
+
+        return gain
 
 
     def get_image(self):

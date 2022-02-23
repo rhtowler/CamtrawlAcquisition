@@ -297,7 +297,7 @@ class SerialDevice(QObject):
         nBytesRx = self.serialPort.in_waiting
         if nBytesRx > 0:
             #  data available - read
-            rxData = self.serialPort.read(nBytesRx)
+            rxData = self.serialPort.read(nBytesRx).decode('utf-8')
 
             #  check if there is data in the buffer and append if so
             buffLength = len(self.rxBuffer)
@@ -324,7 +324,6 @@ class SerialDevice(QObject):
 
                 #  loop thru the extracted lines
                 for line in lines:
-                    line = line.decode('utf-8')
                     err = None
                     #  check for complete lines
                     if line.endswith('\n') or line.endswith('\r'):

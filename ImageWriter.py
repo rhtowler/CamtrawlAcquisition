@@ -93,11 +93,11 @@ class ImageWriter(QtCore.QObject):
 
     @QtCore.pyqtSlot(str, dict)
     def WriteImage(self, camera_name, image_data):
-        '''The WriteImage slot writes the provided image to a file using the
-        provided fully qualified file name.
+        '''The WriteImage slot writes image data to disk. It
         '''
 
-        if self.save_images:
+        save_this_image = self.save_images and image_data['save_still'] and image_data['ok']
+        if save_this_image:
             #  we're writing image files
 
             #  check if we should scale the image before writing
@@ -141,12 +141,12 @@ class ImageWriter(QtCore.QObject):
                 self.error.emit(self.camera_name, 'write_image Error: %s' % ex)
 
 
-        #  check if we're writing a video frame or image file
-        if self.save_video:
+        #  check if we're writing a video frame
+        if self.save_video and image_data['save_frame'] and image_data['ok']:
 
             #  check if we should scale the image before writing
             same_image = False
-            if not self.save_images or (self.video_options['scale'] !=
+            if not save_this_image or (self.video_options['scale'] !=
                     self.image_options['scale']):
 
                 if self.video_options['scale'] < 100 and self.video_options['scale'] > 0:
@@ -163,8 +163,8 @@ class ImageWriter(QtCore.QObject):
             if ((not same_image and image_data['is_hdr']) or
                     (same_image and self.image_options['file_ext'] in ['.hdr', '.pic', '.exr'])):
 
-
-                #  TODO: implement tonemap conversion here too
+                #  TODO: implement tonemap conversion here too. Should just write a module to
+                #        do this that can be used here and in SpinCamera.
                 scaled_image = np.clip(scaled_image*255, 0, 255).astype('uint8')
 
             #  we're recording a video - check if one is currently open
@@ -178,7 +178,6 @@ class ImageWriter(QtCore.QObject):
                     if self.video_options['file_ext'][0] != '.':
                         self.video_options['file_ext'] = '.' + self.video_options['file_ext']
                     filename = image_data['filename'] + self.video_options['file_ext']
-                    print(filename)
 
                     self.StartRecording(filename, scaled_image.shape[1],
                             scaled_image.shape[0])
