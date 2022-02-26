@@ -51,18 +51,6 @@ class SimpleAcquisition(AcquisitionBase):
         super().__init__(**kwargs)
 
 
-    def AcquisitionSetup(self):
-        # call the base class's AcquisitionSetup
-        super().AcquisitionSetup()
-
-        # If isAcquiring is true we know our cameras are ready to log data. Since
-        # SimpleAcquisition isn't using the Camtrawl Controller we just start
-        # triggering once the system is ready. We delay this first trigger for
-        # 1/2 a second to give the cameras time to finish getting ready.
-        if self.isAcquiring:
-            self.triggerTimer.start(500)
-
-
 def exitHandler(a,b=None):
     '''
     exitHandler is called when CTRL-c is pressed on Windows

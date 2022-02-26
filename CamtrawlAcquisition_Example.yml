@@ -6,6 +6,39 @@
 # will be used. Defaults are defined at the top of CamtrawlAcquisition.py
 #
 
+#  specify some system options
+#
+#
+system:
+
+    #  Set ntp_sync_clock_at_boot to attempt to sync the computer's clock to an NTP server
+    #  when the system boots. Depending on how long it takes the NTP server to respond,
+    #  it is possible the deployment folder may be created using an incorrect time. This
+    #  shouldn't be an issue if you are regularly booting into maintenance mode while
+    #  the NTP server is available to download images.
+    ntp_sync_clock_at_boot: False
+
+    #  Set ntp_sync_while_deployed to True to have the system try to sync the clock while
+    #  in deployed mode. The default is False because it is assumed that a network
+    #  connection will not be available when the system is deployed.
+    ntp_sync_while_deployed: False
+
+    #  Set ntp_server_address to the network address of the NTP server to use for time sync.
+    ntp_server_address:  192.168.0.99
+
+    #  Set wifi_disable_while_deployed to True to disable all RF radios when the
+    #  camtrawl controller reports that the system is "at depth" aka "deployed".
+    #  The system is in this state when the depth > turn on depth or when the
+    #  pressure switch IO line is low. This means WiFi and Bluetooth will be
+    #  disabled during the deployment.
+    #
+    #  Disabling the WiFi radio reduces power consumption around 1/2 to 3/4 watt.
+    #  That's not a lot, but for long term deployments every little bit can help.
+    #
+    #  Currently this option is only available on Linux based systems.
+    wifi_disable_while_deployed: False
+
+
 #  specify some general application settings
 application:
 
@@ -77,6 +110,21 @@ application:
 
     #  Linux users will most likely want to leave this empty.
     #ffmpeg_path:
+
+    #  Set disk_free_monitor to True to have the acquisition application periodically check
+    #  the disk free space and stop acquiring if the free space drops below the specified
+    #  minimum value in megabytes. Completely filling a disk can cause issues with camera
+    #  operation and it is advised to enable this feature. If omitted, the default value
+    #  is True.
+    disk_free_monitor: True
+
+    #  Set disk_free_min_mb to the minimum free space in megabytes that should be left on
+    #  the image data disk. If omitted, the default value is 150 MB
+    disk_free_min_mb: 150
+
+    #  Set disk_free_check_int_ms to the interval in milliseconds between disk free checks.
+    #  If omitted, the default value is 5000 ms (5 seconds)
+    disk_free_check_int_ms: 5000
 
 
 #  specify some details about how fast and how many times cameras should be triggered

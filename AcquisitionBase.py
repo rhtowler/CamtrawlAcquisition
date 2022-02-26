@@ -38,6 +38,7 @@ import datetime
 import logging
 import functools
 import platform
+import subprocess
 import collections
 import shutil
 #  import order seems to matter on linux. QtCore and QtSql (in metadata_db)
@@ -138,6 +139,7 @@ class AcquisitionBase(QtCore.QObject):
         self.serverThread = None
         self.server = None
         self.system = None
+        self.diskStatTimer = None
         self.cameras = []
         self.threads = []
         self.hw_triggered_cameras = []
@@ -161,6 +163,9 @@ class AcquisitionBase(QtCore.QObject):
         self.configuration['application']['shut_down_on_exit'] = False
         self.configuration['application']['always_trigger_at_start'] = False
         self.configuration['application']['ffmpeg_path'] = ''
+        self.configuration['application']['disk_free_monitor'] = True
+        self.configuration['application']['disk_free_min_mb'] = 150
+        self.configuration['application']['disk_free_check_int_ms'] = 5000
 
         self.configuration['acquisition']['trigger_rate'] = 5
         self.configuration['acquisition']['trigger_limit'] = -1
@@ -184,7 +189,6 @@ class AcquisitionBase(QtCore.QObject):
         #  the application and fix the issue when the application is set
         #  to shut the PC down upon exit.
         self.shutdownTimer = QtCore.QTimer(self)
-        self.shutdownTimer.timeout.connect(self.AcqisitionTeardown)
         self.shutdownTimer.setSingleShot(True)
 
         #  continue the setup after QtCore.QCoreApplication.exec_() is called
@@ -330,10 +334,74 @@ class AcquisitionBase(QtCore.QObject):
                 (self.configuration['acquisition']['trigger_rate'],
                 self.configuration['acquisition']['trigger_limit']))
 
-        #  configure the cameras...
-        ok = self.ConfigureCameras()
+        #  check if we should check the available free space on our destination device.
+        if self.configuration['application']['disk_free_monitor']:
 
-        if ok:
+            #  get the starting free space and report
+            disk_stats = shutil.disk_usage(self.image_dir)
+            disk_free_mb = disk_stats.free / 1024 / 1024
+
+            #  check if we even have enough space to start
+            if disk_free_mb <= self.configuration['application']['disk_free_min_mb']:
+                #  no, don't got the space
+                self.disk_ok = False
+                self.logger.critical("CRITICAL ERROR: Free space: %d MB is less than the " % (disk_free_mb) +
+                    "minimum allowed %d MB" % (self.configuration['application']['disk_free_min_mb']))
+                self.logger.critical("Application exiting due to lack of free disk space")
+            else:
+                #  free space is greater than min
+                self.disk_ok = True
+                self.logger.info("Starting to monitor disk free space. Starting free space: " +
+                        "%d MB. Minimum free space set to: %d MB" % (disk_free_mb,
+                        self.configuration['application']['disk_free_min_mb']))
+
+                #  Create a timer to periodically check the disk free space
+                self.diskStatTimer = QtCore.QTimer(self)
+                self.diskStatTimer.timeout.connect(self.CheckDiskFreeSpace)
+                self.diskStatTimer.setSingleShot(False)
+                self.diskStatTimer.start(self.configuration['application']['disk_free_check_int_ms'])
+        else:
+            #  we're not checking the disk free space
+            self.disk_ok = True
+
+        #  if the free space is ok, configure the cameras
+        if self.disk_ok:
+            self.cam_ok = self.ConfigureCameras()
+            if not self.cam_ok:
+                #  we were unable to find any cameras
+                self.logger.critical("CRITICAL ERROR: Unable to find any cameras. " +
+                        "The application will exit.")
+        else:
+            self.cam_ok = False
+
+
+        #  At this point we should know if we have at least one camera to use
+        #  and some free disk space but what we do next may depend on how the
+        #  child class is implemented. We'll finish setup in another method so
+        #  we can override it as needed in child classes to handle their unique
+        #  setup requirements.
+        #
+        #  If we have at least one camera available we delay calling this method
+        #  to give the cameras time to start. This really just makes the log linear
+        #  since the camera threads will log their start before anything is logged
+        #  in AcquisitionSetup2. This makes the log more readable.
+        setupDelayTimer = QtCore.QTimer(self)
+        setupDelayTimer.timeout.connect(self.AcquisitionSetup2)
+        setupDelayTimer.setSingleShot(True)
+        if self.cam_ok:
+            setupDelayTimer.start(250)
+        else:
+            setupDelayTimer.start(0)
+
+
+    def AcquisitionSetup2(self):
+        '''
+        AcquisitionSetup2 handles the last details of startup and what to do
+        if we have a problem with the cams or disk.
+        '''
+
+        #  check if everything is ok
+        if self.cam_ok and self.disk_ok:
             #  the cameras are ready to acquire. Set the isAcquiring property
             self.isAcquiring = True
 
@@ -341,13 +409,14 @@ class AcquisitionBase(QtCore.QObject):
             if self.configuration['server']['start_server']:
                 self.StartServer()
 
-        else:
-            #  we were unable to find any cameras
-            self.logger.error("Since there are no available cameras we cannot proceed " +
-                    "and the application will exit.")
+            #  start the trigger timer. Set a long initial interval
+            #  to allow the cameras time to finish getting ready.
+            self.triggerTimer.start(500)
 
-            #  check if we're supposed to shut down. If so, we will delay the shutdown to
-            #  allow the user to exit the app before the PC shuts down and correct the problem.
+        else:
+            #  no, something didn't work out so check if we're supposed to shut down.
+            #  If so, we will delay the shutdown to allow the user to exit the app
+            #  before the PC shuts down and correct the problem.
             if self.configuration['application']['shut_down_on_exit']:
                 self.logger.error("Shutdown on exit is set. The PC will shut down in 5 minutes.")
                 self.logger.error("You can exit the application by pressing CTRL-C to " +
@@ -356,18 +425,40 @@ class AcquisitionBase(QtCore.QObject):
                 #  set the shutdownOnExit attribute so we, er shutdown on exit
                 self.shutdownOnExit = True
 
-                #  wait 5 minutes before shutting down
-                shutdownTimer = QtCore.QTimer(self)
-                shutdownTimer.timeout.connect(self.AcqisitionTeardown)
-                shutdownTimer.setSingleShot(True)
+                #  complete setup of our shutdown timer and start it
+                self.shutdownTimer.timeout.connect(self.AcqisitionTeardown)
                 #  delay shutdown for 5 minutes
-                shutdownTimer.start(5000 * 60)
+                self.shutdownTimer.start(5000 * 60)
 
             else:
                 #  Stop acquisition and close the app
                 self.StopAcquisition(exit_app=True, shutdown_on_exit=False)
 
-        # The next move is up to the child class.
+
+    @QtCore.pyqtSlot()
+    def CheckDiskFreeSpace(self):
+        '''
+        CheckDiskFreeSpace checks the available free space for the data directory and
+        stops acquisition if it drops below the min threshold.
+        '''
+
+        #  get the disk free space in MB
+        disk_stats = shutil.disk_usage(self.image_dir)
+        disk_free_mb = disk_stats.free / 1024 / 1024
+
+        if disk_free_mb <= self.configuration['application']['disk_free_min_mb']:
+
+            #  stop the timer
+            self.diskStatTimer.stop()
+
+            #  Log that we're stopping because we're out of disk space
+            self.logger.critical("The system is stopping because the data disk is full.")
+            self.logger.critical("  Free space: %d MB is less than the " % (disk_free_mb) +
+                    "minimum allowed %d MB" % (self.configuration['application']['disk_free_min_mb']))
+
+            #  Stop acquisition and close the app
+            self.StopAcquisition(exit_app=True,
+                    shutdown_on_exit=self.configuration['application']['shut_down_on_exit'])
 
 
     def ConfigureCameras(self):
@@ -886,23 +977,28 @@ class AcquisitionBase(QtCore.QObject):
 
             #  execute the "shutdown later" command
             if os.name == 'nt':
-                #  on windows we can simply call shutdown
-                os.system("shutdown -s -t 12")
+                #  on windows we can simply call shutdown and delay 12 seconds
+                subprocess.Popen(["shutdown", "-s", "-t", "12"],
+                        creationflags=subprocess.DETACHED_PROCESS |
+                        subprocess.CREATE_NEW_PROCESS_GROUP)
             else:
                 #  on linux we have a script we use to delay the shutdown.
                 #  Since the shutdown command can't delay less than one minute,
-                #  we use a script to delay 10 seconds and then call shutdown.
+                #  we use a script to delay 5 seconds and then call shutdown.
                 #
                 #  You must add an entry in the sudoers file to allow the user running this
                 #  application to execute the shutdown command without a password. For example
-                #  add these line to your /etc/sudoers file:
-                #    camtrawl ALL=NOPASSWD: /usr/local/bin/delay_shutdown.sh
+                #  add these lines to your /etc/sudoers file:
+                #    camtrawl ALL=NOPASSWD: /camtrawl/scripts/delay_shutdown.sh
                 #    camtrawl ALL=NOPASSWD: /sbin/shutdown.sh
-                os.system("sudo /usr/local/bin/delay_shutdown.sh &")
+                subprocess.Popen(['sudo', '/camtrawl/scripts/delay_shutdown.sh'],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        preexec_fn=os.setpgrp)
 
         self.logger.info("Acquisition Stopped.")
         self.logger.info("Application exiting...")
 
+        #  we be done
         QtCore.QCoreApplication.instance().quit()
 
 

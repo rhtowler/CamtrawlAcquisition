@@ -43,7 +43,7 @@ class CamtrawlController(QtCore.QObject):
 
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)
-        
+
         self.isRunning = False
 
         #  set the serial port poroperties
@@ -137,7 +137,7 @@ class CamtrawlController(QtCore.QObject):
         that the PC is shutting down. The PC typically only signals the controller
         to shut down when there is an unrecoverable acquisition error.
         '''
-        msg = "setPCState,255\n"
+        msg = "setPCState,254\n"
         self.txSerialData.emit(self.deviceParams['deviceName'], msg)
         self.logger.debug("CamtrawlController sent: " + msg)
 

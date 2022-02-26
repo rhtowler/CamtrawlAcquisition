@@ -121,24 +121,24 @@ class SerialDevice(QObject):
         if  isinstance(deviceParams['port'], (int, float)):
             deviceParams['port'] = 'COM' + str(int(deviceParams['port']) + 1)
 
-#        try:
+        try:
             #  create the serial port use the factory function serial_for_url to return either
             #  a native serial port instance or a RFC 2217 instance based on the port definition
-        self.serialPort = serial.serial_for_url(deviceParams['port'], do_not_open=True, baudrate=deviceParams['baud'],
-                                      bytesize=deviceParams['byteSize'], parity=deviceParams['parity'].upper(),
-                                      stopbits=deviceParams['stopBits'])
+            self.serialPort = serial.serial_for_url(deviceParams['port'], do_not_open=True, baudrate=deviceParams['baud'],
+                                          bytesize=deviceParams['byteSize'], parity=deviceParams['parity'].upper(),
+                                          stopbits=deviceParams['stopBits'])
 
-        #  set flow control
-        if deviceParams['flowControl'].upper() == 'RTSCTS':
-            self.serialPort.rtscts = True
-        elif deviceParams['flowControl'].upper() == 'DSRDTR':
-            self.serialPort.dsrdtr = True
-        elif deviceParams['flowControl'].upper() == 'SOFTWARE':
-            self.serialPort.xonxoff = True
+            #  set flow control
+            if deviceParams['flowControl'].upper() == 'RTSCTS':
+                self.serialPort.rtscts = True
+            elif deviceParams['flowControl'].upper() == 'DSRDTR':
+                self.serialPort.dsrdtr = True
+            elif deviceParams['flowControl'].upper() == 'SOFTWARE':
+                self.serialPort.xonxoff = True
 
-#        except Exception as e:
-#            self.SerialError.emit(self.deviceName, SerialError('Unable to create serial port for ' +
-#                    self.deviceName + '. Invalid port option.', parent=e))
+        except Exception as e:
+            self.SerialError.emit(self.deviceName, SerialError('Unable to create serial port for ' +
+                    self.deviceName + '. Invalid port option.', parent=e))
 
 
     @pyqtSlot()
@@ -150,36 +150,36 @@ class SerialDevice(QObject):
         #  check that we're not currently polling - assume if pollTimer is None
         #  we are not running.
         if (self.pollTimer is None):
-#            try:
+            try:
 
-            #  open the serial port
-            self.serialPort.open()
+                #  open the serial port
+                self.serialPort.open()
 
-            #  set RTS and DTR
-            if (self.serialPort.rtscts == False):
-                self.serialPort.rts = self.rts
-            if (self.serialPort.dsrdtr == False):
-                self.serialPort.dtr = self.dtr
+                #  set RTS and DTR
+                if (self.serialPort.rtscts == False):
+                    self.serialPort.rts = self.rts
+                if (self.serialPort.dsrdtr == False):
+                    self.serialPort.dtr = self.dtr
 
-            #  get the initial control pin states
-            self.controlLines = [self.serialPort.cts, self.serialPort.dsr,
-                                   self.serialPort.ri, self.serialPort.cd]
+                #  get the initial control pin states
+                self.controlLines = [self.serialPort.cts, self.serialPort.dsr,
+                                       self.serialPort.ri, self.serialPort.cd]
 
-            #  create the timers we'll use to poll the serial port
-            self.pollTimer = QTimer()
-            self.pollTimer.timeout.connect(self.pollSerialPort)
-            self.pollTimer.setInterval(self.pollInterval)
-            self.txTimer = QTimer()
-            self.txTimer.timeout.connect(self.txSerialPort)
-            self.txTimer.setInterval(self.txInterval)
+                #  create the timers we'll use to poll the serial port
+                self.pollTimer = QTimer()
+                self.pollTimer.timeout.connect(self.pollSerialPort)
+                self.pollTimer.setInterval(self.pollInterval)
+                self.txTimer = QTimer()
+                self.txTimer.timeout.connect(self.txSerialPort)
+                self.txTimer.setInterval(self.txInterval)
 
-            # start polling
-            self.pollTimer.start()
-            self.txTimer.start()
+                # start polling
+                self.pollTimer.start()
+                self.txTimer.start()
 
-#            except Exception as e:
-#                self.SerialError.emit(self.deviceName, SerialError('Unable to open serial port for device ' +
-#                       self.deviceName + '.', parent=e))
+            except Exception as e:
+                self.SerialError.emit(self.deviceName, SerialError('Unable to open serial port for device ' +
+                       self.deviceName + '.', parent=e))
 
 
     @pyqtSlot(list)
@@ -297,7 +297,10 @@ class SerialDevice(QObject):
         nBytesRx = self.serialPort.in_waiting
         if nBytesRx > 0:
             #  data available - read
-            rxData = self.serialPort.read(nBytesRx).decode('utf-8')
+            try:
+                rxData = self.serialPort.read(nBytesRx).decode('utf-8')
+            except:
+                rxData = ''
 
             #  check if there is data in the buffer and append if so
             buffLength = len(self.rxBuffer)

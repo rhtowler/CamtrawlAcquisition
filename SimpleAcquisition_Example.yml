@@ -72,6 +72,21 @@ application:
     #  Linux users will most likely want to leave this empty.
     #ffmpeg_path:
 
+    #  Set disk_free_monitor to True to have the acquisition application periodically check
+    #  the disk free space and stop acquiring if the free space drops below the specified
+    #  minimum value in megabytes. Completely filling a disk can cause issues with camera
+    #  operation and it is advised to enable this feature. If omitted, the default value
+    #  is True.
+    disk_free_monitor: True
+
+    #  Set disk_free_min_mb to the minimum free space in megabytes that should be left on
+    #  the image data disk. If omitted, the default value is 150 MB
+    disk_free_min_mb: 150
+
+    #  Set disk_free_check_int_ms to the interval in milliseconds between disk free checks.
+    #  If omitted, the default value is 5000 ms (5 seconds)
+    disk_free_check_int_ms: 5000
+
 
 #  specify some details about how fast and how many times cameras should be triggered
 acquisition:

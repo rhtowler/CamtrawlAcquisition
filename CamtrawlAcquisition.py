@@ -35,6 +35,7 @@
 
 
 import os
+import shutil
 from AcquisitionBase import AcquisitionBase
 from PyQt5 import QtCore
 import CamtrawlController
@@ -82,28 +83,64 @@ class CamtrawlAcquisition(AcquisitionBase):
         self.configuration['sensors']['synchronous_timeout'] = 5
 
 
-    def AcquisitionSetup(self):
-        '''AcquisitionSetup reads the configuration files, creates the log file,
-        opens up the metadata database, and sets up the cameras.
+    def AcquisitionSetup2(self):
         '''
-        # call the base class's AcquisitionSetup to perform
-        super().AcquisitionSetup()
+        AcquisitionSetup2 handles the last details of startup and what to do
+        if we have a problem with the cams or disk.
+        '''
 
-        # If isAcquiring is true we know our cameras are ready to log data. If we're
-        # supposed to use the Camtrawl Controller, we start it here.
-        if self.isAcquiring:
-            #  set up the controller
-            if self.configuration['controller']['use_controller']:
-                #  we're using the Camtrawl controller. It will signal the
-                #  system state after connecting which we'll use to determine
-                #  if we should start triggering or not.
-                self.StartController()
-            else:
-                #  if we're not using the controller, we know we're software
-                #  triggering so we just start the timer. We set a long interval
-                #  for this first trigger to allow the cameras time to finish
-                #  getting ready.
+        #  If we're using the controller we need to connect to it first before
+        #  we can finish acting on the camera and disk states. If we're not
+        #  using the controller we can handle everything here.
+
+        if self.configuration['controller']['use_controller']:
+
+            #  Create and start the controller object. It will emit a
+            #  ChangedState signal after it connects to the device and queries
+            #  the state.
+            self.StartController()
+
+        else:
+
+            #  if we're not using the controller, we check if we have at least one
+            #  camera configured and some disk space to use.
+            if self.cam_ok and self.disk_ok:
+                #  the cameras are ready to acquire and we have some disk space.
+                #  Set the isAcquiring property
+                self.isAcquiring = True
+
+                #  start the server, if enabled
+                if self.configuration['server']['start_server']:
+                    self.StartServer()
+
+                #  If we're here we know we're using software triggering so start
+                #  the trigger timer. We'll set a long first interval to give the
+                #  cameras a little more time to get ready.
                 self.triggerTimer.start(500)
+
+            else:
+                #  something went wrong during startup. The error has already been logged
+                #  but we need to exit the app appropriately.
+
+                #  Check if we're supposed to shutdown on exit. If so, we will delay the
+                #  shutdown to allow the user to exit the app before the PC shuts down
+                #  and correct the problem.
+                if self.configuration['application']['shut_down_on_exit']:
+                    self.logger.critical("Shutdown on exit is set. The PC will shut down in 5 minutes.")
+                    self.logger.critical("You can exit the application by pressing CTRL-C to " +
+                            "circumvent the shutdown and keep the PC running.")
+
+                    #  set the shutdownOnExit attribute so we, er shutdown on exit
+                    self.shutdownOnExit = True
+
+                    #  finish setting up the shutdown timer and start
+                    self.shutdownTimer.timeout.connect(self.AcqisitionTeardown)
+                    #  delay shutdown for 5 minutes
+                    self.shutdownTimer.start(5000 * 60)
+
+                else:
+                    #  Stop acquisition and close the app
+                    self.StopAcquisition(exit_app=True, shutdown_on_exit=False)
 
 
     def StartController(self):
@@ -157,10 +194,59 @@ class CamtrawlAcquisition(AcquisitionBase):
         #  so we can unset the controllerStarting state.
         if self.controllerStarting:
             self.controllerStarting = False
-            
+
             #  next, tell the controller we're ready
             self.controller.sendReadySignal()
 
+            #  finish the setup by dealing with the camera and disk states
+            if self.cam_ok and self.disk_ok:
+                #  the cameras are ready to acquire and we have some disk space.
+                #  Set the isAcquiring property
+                self.isAcquiring = True
+
+                #  start the server, if enabled
+                if self.configuration['server']['start_server']:
+                    self.StartServer()
+
+            else:
+                #  something went wrong during startup. The error has already been logged
+                #  but we need to exit the app appropriately. If the system is in any other
+                #  state than forced on, we shut it down.
+
+                forcedOn = new_state == self.controller.FORCED_ON
+
+                if not forcedOn or self.configuration['application']['shut_down_on_exit']:
+                    #  ok, we're shutting down.
+
+                    #  we don't want to get into a boot loop so we want to give the
+                    #  user time to exit the app before the shutdown command is issued.
+                    #  But, the delay is much shorter when the system isn't forced on.
+                    if forcedOn:
+                        delay = 1000 * 60 * 5
+                        self.logger.critical("shut_down_on_exit is set in the config. " +
+                                "The PC will shut down in 5 minutes.")
+                    else:
+                        delay = 1000 * 30
+                        self.logger.critical("Since we are unable to collect data and we're" +
+                                " at depth, the PC will shut down in 30 seconds.")
+                    self.logger.critical("You can exit the application by pressing CTRL-C to " +
+                            "circumvent the shutdown and keep the PC running.")
+
+                    #  configure the shutdown timer to call a method that sends the controller
+                    #  the shutdown command. The controller will respond with the new
+                    #  state and the next shutdown tasks are handled below.
+                    self.shutdownTimer.timeout.connect(self.DelayedShutdownHandler)
+                    self.shutdownTimer.start(delay)
+
+                else:
+                    #  shut_down_on_exit is not set and the system is in maintenance mode
+                    #  so we just exit without shutting down.
+
+                    #  Stop acquisition and close the app
+                    self.StopAcquisition(exit_app=True, shutdown_on_exit=False)
+
+                #  since we have a problem, we don't have any further business here.
+                return
 
         if self.controllerCurrentState == new_state:
             #  If the state hasn't changed we just return. This wouldn't
@@ -176,16 +262,6 @@ class CamtrawlAcquisition(AcquisitionBase):
             #  so we *do not* start triggering.
 
             self.logger.info("System operating in download mode.")
-
-        elif ((new_state == self.controller.FORCED_ON) and
-                self.configuration['application']['always_trigger_at_start']):
-            #  the system has been forced on and we're configured to always
-            #  trigger when starting so we start the trigger timer.
-
-            self.logger.info("System operating in forced trigger mode - starting triggering...")
-            self.internalTriggering = True
-            #  The first trigger interval is long to ensure the cameras are ready
-            self.triggerTimer.start(500)
 
         elif ((new_state == self.controller.FORCED_ON) and
                 self.configuration['application']['always_trigger_at_start']):
@@ -215,9 +291,13 @@ class CamtrawlAcquisition(AcquisitionBase):
             self.triggerTimer.start(500)
 
         elif new_state >= self.controller.FORCE_ON_REMOVED:
-            #  The controller is in one of many shutdown states - we'll
-            #  branch on the type to report why we're shutting down
-            #  then shut down.
+            #  The controller is in one of many shutdown states
+
+            #  Stop the shutdownTimer in the rare case it is running and the system
+            #  entered into a new shutdown state.
+            self.shutdownTimer.stop()
+
+            #  branch on the type to report why we're shutting down then shut down.
             if new_state == self.controller.FORCE_ON_REMOVED:
                 self.logger.info("The system is shutting down because the force on plug has been pulled.")
             elif new_state == self.controller.SHALLOW:
@@ -244,6 +324,58 @@ class CamtrawlAcquisition(AcquisitionBase):
 
         #  lastly, we update our tracking of the state
         self.controllerCurrentState = new_state
+
+
+    @QtCore.pyqtSlot()
+    def DelayedShutdownHandler(self):
+        '''
+        DelayedShutdownHandler is called after the shutdown delay timer expires.
+        We delay certain shutdown scenarios to try to eliminate boot loops where
+        the system cannot run and shuts down and the user doesn't have time to
+        intervene and stop it.
+        '''
+
+        #  Send the shutdown signal to the controller. This will cause the
+        #  controller state to change and it will emit the StateChanged signal.
+        #  The state will be a shutdown state, and the ControllerStateChanged
+        #  method will handle the rest of the shutdown initiation.
+        self.logger.debug("Sending shutdown signal to the controller")
+        self.controller.sendShutdownSignal()
+
+
+    @QtCore.pyqtSlot()
+    def CheckDiskFreeSpace(self):
+        '''
+        CheckDiskFreeSpace checks the available free space for the data directory and
+        stops acquisition if it drops below the min threshold.
+        '''
+
+        #  get the disk free space in MB
+        disk_stats = shutil.disk_usage(self.image_dir)
+        disk_free_mb = disk_stats.free / 1024 / 1024
+
+        if disk_free_mb <= self.configuration['application']['disk_free_min_mb']:
+
+            #  stop the timer
+            self.diskStatTimer.stop()
+
+            #  Log that we're stopping because we're out of disk space
+            self.logger.critical("The system is stopping because the data disk is full.")
+            self.logger.critical("  Free space: %d MB is less than the " % (disk_free_mb) +
+                    "minimum allowed %d MB" % (self.configuration['application']['disk_free_min_mb']))
+
+            #  if we're using the controller, we don't stop, but signal the controller
+            #  we want to stop.
+            if self.configuration['controller']['use_controller']:
+                #  If we're using the controller, we send the PC ERROR signal which
+                #  will result in the controller sending a shutdown command to the
+                #  application.
+                self.logger.debug("Sending PC Error signal to the controller...")
+                self.controller.sendShutdownSignal()
+            else:
+                #  Stop acquisition and close the app
+                self.StopAcquisition(exit_app=True,
+                        shutdown_on_exit=self.configuration['application']['shut_down_on_exit'])
 
 
     @QtCore.pyqtSlot(str, str)
@@ -309,10 +441,11 @@ class CamtrawlAcquisition(AcquisitionBase):
         AcqisitionTeardown is called when the application is shutting down.
         The cameras will have already been told to stop acquiring
         """
-        
-        #  stop the controller
-        self.controller.stopController()
-        
+
+        #  stop the controller (if started)
+        if self.controller:
+            self.controller.stopController()
+
         # call the base class's AcqisitionTeardown method
         super().AcqisitionTeardown()
 
