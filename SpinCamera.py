@@ -120,6 +120,7 @@ class SpinCamera(QtCore.QObject):
         self.acquiring = False
         self.save_path = '.'
         self.date_format = "D%Y%m%d-T%H%M%S.%f"
+        self.trig_timestamp = None
         self.n_triggered = 0
         self.total_triggers = 0
         self.save_stills_divider = 1
@@ -432,7 +433,6 @@ class SpinCamera(QtCore.QObject):
                 self.save_image.append(False)
 
 
-
         #  trigger the camera if we're using software triggering
         if (self.trigger_mode == PySpin.TriggerSource_Software):
             #  Software trigger the camera
@@ -469,6 +469,9 @@ class SpinCamera(QtCore.QObject):
         #  In these cases, we set self.n_triggered = 0 and trigger the camera directly
         #  without calling SpinCamera.trigger method.
         if self.n_triggered == 0:
+            return
+
+        if self.trig_timestamp is None:
             return
 
         #  get the index this event is associated with
@@ -647,6 +650,7 @@ class SpinCamera(QtCore.QObject):
             #  if we're here, we are done with this trigger event
             self.triggerComplete.emit(self)
             self.n_triggered = 0
+            self.trig_timestamp = None
 
 
     def load_hdr_response(self, filename):

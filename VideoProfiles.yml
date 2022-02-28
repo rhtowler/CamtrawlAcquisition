@@ -8,7 +8,7 @@ default:
     encoder: libx264
     file_ext:  .mkv
     pixel_format: yuv420p
-    max_frames_per_file: 1000
+    max_frames_per_file: 2500
     ffmpeg_debug_out: False
     preset: fast
     crf: 26
@@ -18,7 +18,7 @@ mjpeg:
     #quality: 80
     pixel_format: yuvj420p
     file_ext:  .mkv
-    max_frames_per_file: 1000
+    max_frames_per_file: 2500
     ffmpeg_debug_out: False
 
 x265-fast:
@@ -27,7 +27,7 @@ x265-fast:
     crf: 26
     pixel_format: yuv420p
     file_ext:  .mkv
-    max_frames_per_file: 1000
+    max_frames_per_file: 5000
     ffmpeg_debug_out: False
 
 x264-fast:
@@ -36,7 +36,7 @@ x264-fast:
     crf: 26
     pixel_format: yuv420p
     file_ext:  .mkv
-    max_frames_per_file: 1000
+    max_frames_per_file: 5000
     ffmpeg_debug_out: False
 
 
