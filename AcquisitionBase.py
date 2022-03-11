@@ -548,9 +548,14 @@ class AcquisitionBase(QtCore.QObject):
 
                 #  add or update this camera in the database
                 if self.use_db:
+                    link_speed = 0
+                    if 'DeviceCurrentSpeed' in sc.device_info:
+                        link_speed =  sc.device_info['DeviceCurrentSpeed']
+                    elif 'DeviceLinkSpeed' in sc.device_info:
+                        link_speed = sc.device_info['DeviceLinkSpeed']
                     self.db.update_camera(sc.camera_name, sc.device_info['DeviceID'], sc.camera_id,
                             config['label'], config['rotation'], sc.device_info['DeviceVersion'],
-                            sc.device_info['DeviceCurrentSpeed'])
+                            link_speed)
 
                 # Set the camera's label
                 sc.label = config['label']
@@ -602,7 +607,7 @@ class AcquisitionBase(QtCore.QObject):
 
                 #  set up HDR if configured
                 if config['hdr_enabled']:
-                    ok = sc.enable_HDR_mode()
+                    ok = sc.enable_hdr_mode()
                     if ok:
                         self.logger.info('    %s: Enabling HDR: OK' % (sc.camera_name))
                         if config['hdr_settings'] is not None:
@@ -634,7 +639,7 @@ class AcquisitionBase(QtCore.QObject):
                     else:
                         self.logger.error('    %s: Failed to enable HDR.' % (sc.camera_name))
                 else:
-                    sc.disable_HDR_mode()
+                    sc.disable_hdr_mode()
 
                 #  create a thread for this camera to run in
                 thread = QtCore.QThread()

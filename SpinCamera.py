@@ -121,6 +121,7 @@ class SpinCamera(QtCore.QObject):
         self.save_path = '.'
         self.date_format = "D%Y%m%d-T%H%M%S.%f"
         self.trig_timestamp = None
+        self.trigger_mode = PySpin.TriggerSource_Software
         self.n_triggered = 0
         self.total_triggers = 0
         self.save_stills_divider = 1
@@ -141,7 +142,6 @@ class SpinCamera(QtCore.QObject):
         self.cam.Init()
 
         #  get some basic properties
-        self.cam.ExposureTime.GetAccessMode()
         self.exposure = self.cam.ExposureTime.GetValue()
         self.gain = self.cam.Gain.GetValue()
         self.pixelFormat = self.cam.PixelFormat.GetValue()
@@ -166,6 +166,9 @@ class SpinCamera(QtCore.QObject):
         hdr_parameters["Image3"] = {'exposure':0, 'gain':0, 'emit_signal':True, 'save_image':True}
         hdr_parameters["Image4"] = {'exposure':0, 'gain':0, 'emit_signal':True, 'save_image':True}
 
+        #  get the current state of hdr_enabled so we can set it back when we're done
+        hdr_enabled = self.hdr_enabled
+
         if nodemap is None:
             nodemap = self.cam.GetNodeMap()
 
@@ -174,8 +177,8 @@ class SpinCamera(QtCore.QObject):
         hdr_exposure_abs = PySpin.CFloatPtr(nodemap.GetNode("pgrHDR_ExposureTimeAbs"))
         hdr_gain_abs = PySpin.CFloatPtr(nodemap.GetNode("pgrHDR_GainAbs"))
 
-        #  enable HDR mode so we can access the HDR parameter nodes
-        self.enable_HDR_mode(nodemap=nodemap)
+        #  enable HDR mode so we can access the HDR parameter nodes.
+        self.enable_hdr_mode(nodemap=nodemap)
 
         #  make sure we can access the required nodes
         if (not self.check_node_accessibility(hdr_image_selector) or
@@ -190,14 +193,14 @@ class SpinCamera(QtCore.QObject):
             hdr_parameters[k]['gain'] = hdr_gain_abs.GetValue()
 
         #  check if we should disable HDR mode
-        if not self.hdr_enabled:
-            self.disable_HDR_mode(nodemap=nodemap)
+        if not hdr_enabled:
+            self.disable_hdr_mode(nodemap=nodemap)
 
         return hdr_parameters
 
 
-    def enable_HDR_mode(self, nodemap=None):
-        '''enable_HDR_mode enables the HDR sequencer in the camera and results in
+    def enable_hdr_mode(self, nodemap=None):
+        '''enable_hdr_mode enables the HDR sequencer in the camera and results in
         collecting 4 images per "trigger" where each image has a unique exposure
         and gain value. This can be used to generate images with much higher dynamic
         ranges for scenes that are relatively static.
@@ -227,8 +230,8 @@ class SpinCamera(QtCore.QObject):
         return self.hdr_enabled
 
 
-    def disable_HDR_mode(self, nodemap=None):
-        '''disable_HDR_mode disables HDR acquisition.
+    def disable_hdr_mode(self, nodemap=None):
+        '''disable_hdr_mode disables HDR acquisition.
         '''
 
         if self.hdr_enabled:
@@ -274,7 +277,7 @@ class SpinCamera(QtCore.QObject):
         hdr_gain_abs = PySpin.CFloatPtr(nodemap.GetNode("pgrHDR_GainAbs"))
 
         #  enable HDR mode so we can access the HDR parameter nodes
-        self.enable_HDR_mode(nodemap=nodemap)
+        self.enable_hdr_mode(nodemap=nodemap)
 
         #  make sure we can access the other required nodes
         if (not self.check_node_accessibility(hdr_image_selector) or
@@ -293,7 +296,7 @@ class SpinCamera(QtCore.QObject):
 
         #  check if we should disable HDR mode
         if not self.hdr_enabled:
-            self.disable_HDR_mode(nodemap=nodemap)
+            self.disable_hdr_mode(nodemap=nodemap)
 
         return True
 
@@ -758,6 +761,7 @@ class SpinCamera(QtCore.QObject):
         try:
             #  manual exposure for values > 0 otherwise we enable auto exposure
             if (exposure_us > 0):
+
                 #  First need to disable auto exposure
                 self.cam.ExposureAuto.SetValue(PySpin.ExposureAuto_Off)
 
