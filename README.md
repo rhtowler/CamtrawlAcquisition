@@ -56,6 +56,7 @@ Currently these applications only work with Teledyne FLIR (formerly Point Grey R
 ## Python Dependencies
 
 * Python > 3.5
+* PyYAML
 * PyQt5
 * [Numpy](https://pypi.org/project/numpy/)
 * PySpin (from [Flir Spinnaker SDK](https://www.flir.com/support-center/iis/machine-vision/downloads/spinnaker-sdk-and-firmware-download/))
