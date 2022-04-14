@@ -764,7 +764,7 @@ class AcquisitionBase(QtCore.QObject):
         '''
 
         #  Check if we received an image or not
-        if (image_data['width'] == 0):
+        if  not image_data['ok']:
             #  no image data
             log_str = (cam_name + ': FAILED TO ACQUIRE IMAGE')
             if self.use_db:
@@ -783,14 +783,16 @@ class AcquisitionBase(QtCore.QObject):
                     image_data['gain'], filename))
         self.logger.debug(log_str)
 
-        #  note that this camera has received (or timed out)
-        self.received[cam_name] = True
-
 
     @QtCore.pyqtSlot(object)
     def CamTriggerComplete(self, cam_obj):
         '''CamTriggerComplete is called when a camera has completed a trigger event.
+        This is called regardless of whether an image was received and/or the camera
+        is configured to emit a signal when it does acquire an image.
         '''
+
+        #  note that this camera has completed the trigger event
+        self.received[cam_obj.camera_name] = True
 
         #  check if all triggered cameras have completed the trigger sequence
         if (all(self.received.values())):
@@ -994,9 +996,9 @@ class AcquisitionBase(QtCore.QObject):
                 #  You must add an entry in the sudoers file to allow the user running this
                 #  application to execute the shutdown command without a password. For example
                 #  add these lines to your /etc/sudoers file:
-                #    camtrawl ALL=NOPASSWD: /camtrawl/scripts/delay_shutdown.sh
+                #    camtrawl ALL=NOPASSWD: /camtrawl/software/scripts/delay_shutdown.sh
                 #    camtrawl ALL=NOPASSWD: /sbin/shutdown.sh
-                subprocess.Popen(['sudo', '/camtrawl/scripts/delay_shutdown.sh'],
+                subprocess.Popen(['sudo', '/camtrawl/software/scripts/delay_shutdown.sh'],
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                         preexec_fn=os.setpgrp)
 

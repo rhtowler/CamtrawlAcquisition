@@ -59,7 +59,7 @@ class CamtrawlAcquisition(AcquisitionBase):
         # call the parent class's init method, passing our args along
         super().__init__(**kwargs)
 
-        # Define additional deafult properties
+        # Define additional default properties
         self.controller = None
         self.controllerStarting = False
         self.HWTriggerHDR = {}
@@ -476,7 +476,8 @@ class CamtrawlAcquisition(AcquisitionBase):
         #  if any cameras are hardware triggered we have to track some other info
         if self.hwTriggered:
             #  reset the image received state for hardware triggered cameras
-            self.ctcTriggerChannel = [False] * len(self.hw_triggered_cameras)
+            #  The CamtrawlController v2 has 2 trigger ports
+            self.ctcTriggerChannel = [False] * 2
             self.maxExposure = 0
             for c in self.hw_triggered_cameras:
                 self.readyToTrigger[c] = False

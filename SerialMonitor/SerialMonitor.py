@@ -1,6 +1,6 @@
 
 from PyQt5.QtCore import pyqtSignal, QObject, QThread, pyqtSlot
-import SerialDevice
+from . import SerialDevice
 
 
 class SerialMonitor(QObject):
@@ -56,7 +56,7 @@ class SerialMonitor(QObject):
     #  define this class's signals
     SerialControlState = pyqtSignal(str, str, bool)
     SerialControlChanged = pyqtSignal(str, dict)
-    SerialDataReceived = pyqtSignal(str, object, object)
+    SerialDataReceived = pyqtSignal(str, str, object)
     txSerialData = pyqtSignal(str, str)
     getSerialCTL = pyqtSignal(str)
     setSerialRTS = pyqtSignal(str, bool)
@@ -327,7 +327,7 @@ class SerialMonitor(QObject):
         self.getSerialCTL.emit(deviceName)
 
 
-    @pyqtSlot()
+    @pyqtSlot(str, str, object)
     def dataReceived(self, deviceName, data, err):
         # consolidates the RX data signals from the individual monitoring threads and re-emit
         self.SerialDataReceived.emit(deviceName, data, err)

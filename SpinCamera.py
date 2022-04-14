@@ -1,10 +1,10 @@
 # coding=utf-8
-
+#
 #     National Oceanic and Atmospheric Administration (NOAA)
 #     Alaskan Fisheries Science Center (AFSC)
 #     Resource Assessment and Conservation Engineering (RACE)
 #     Midwater Assessment and Conservation Engineering (MACE)
-
+#
 #  THIS SOFTWARE AND ITS DOCUMENTATION ARE CONSIDERED TO BE IN THE PUBLIC DOMAIN
 #  AND THUS ARE AVAILABLE FOR UNRESTRICTED PUBLIC USE. THEY ARE FURNISHED "AS
 #  IS."  THE AUTHORS, THE UNITED STATES GOVERNMENT, ITS INSTRUMENTALITIES,
@@ -12,7 +12,7 @@
 #  AS TO THE USEFULNESS OF THE SOFTWARE AND DOCUMENTATION FOR ANY PURPOSE.
 #  THEY ASSUME NO RESPONSIBILITY (1) FOR THE USE OF THE SOFTWARE AND
 #  DOCUMENTATION; OR (2) TO PROVIDE TECHNICAL SUPPORT TO USERS.
-
+#
 """
 .. module:: CamtrawlAcquisition.SpinCamera
 
@@ -507,7 +507,7 @@ class SpinCamera(QtCore.QObject):
         image_data['save_still'] = self.save_this_still
         image_data['save_frame'] = self.save_this_frame
 
-        #  check if we got an image
+        #  only rotate good images
         if (image_data['ok']):
 
             #  check if we're supposed to do anything with this image
@@ -533,7 +533,6 @@ class SpinCamera(QtCore.QObject):
                     image_data['data'] = np.flipud(image_data['data'])
                 elif self.rotation == 'fliplr':
                     image_data['data'] = np.fliplr(image_data['data'])
-
 
                 #  check if we need to emit a signal for this image
                 if self.do_signals[idx]:
@@ -564,11 +563,18 @@ class SpinCamera(QtCore.QObject):
                 self.save_hdr = False
                 self.emit_hdr = False
 
+                #  free the references to any HDR images we did capture
+                self.hdr_images = [None] * 4
+
                 #  force idx=3 to end hdr sequence
                 idx = 3
 
                 #  and emit an error
                 self.error.emit(self.camera_name, 'HDR Sequence aborted.')
+
+            #  we still emit a signal even if the image is "bad"
+            if self.do_signals[idx]:
+                self.imageData.emit(self.camera_name, self.label, image_data)
 
 
         #  check if this is the last image in our sequence.
@@ -648,6 +654,9 @@ class SpinCamera(QtCore.QObject):
                     self.imageData.emit(self.camera_name, self.label, merged_image)
                 if self.save_hdr:
                     self.saveImage.emit(self.camera_name, merged_image)
+
+                #  free the references to the source images
+                self.hdr_images = [None] * 4
 
 
             #  if we're here, we are done with this trigger event
