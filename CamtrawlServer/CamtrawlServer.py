@@ -60,7 +60,7 @@ class CamtrawlServer(QtCore.QObject):
         # reset the cameras and clients dicts
         self.cameras = {}
         self.clients = {}
-        self.sensorData = {}
+        self.sensorDataDict = {}
 
         return True
 
@@ -175,23 +175,23 @@ class CamtrawlServer(QtCore.QObject):
 
                         #  if the sensor ID is 'None' we return all sensor data
                         if dataRequest.id.lower() == 'none':
-                            for id in self.sensorData:
-                                for header in self.sensorData[id]:
+                            for id in self.sensorDataDict:
+                                for header in self.sensorDataDict[id]:
                                     s = sensorData.sensors.add()
                                     s.id = id
                                     s.header = header
-                                    s.timestamp = self.sensorData[id][header]['time'].timestamp()
-                                    s.data = self.sensorData[id][header]['data']
+                                    s.timestamp = self.sensorDataDict[id][header]['time'].timestamp()
+                                    s.data = self.sensorDataDict[id][header]['data']
 
                         #  otherwise we only return data from the specified sensor
                         else:
-                            if dataRequest.id in self.sensorData:
-                                for header in self.sensorData[dataRequest.id]:
+                            if dataRequest.id in self.sensorDataDict:
+                                for header in self.sensorDataDict[dataRequest.id]:
                                     s = sensorData.sensors.add()
                                     s.id = dataRequest.id
                                     s.header = header
-                                    s.timestamp = self.sensorData[dataRequest.id]['time'].timestamp()
-                                    s.data = self.sensorData[dataRequest.id]['data']
+                                    s.timestamp = self.sensorDataDict[dataRequest.id]['time'].timestamp()
+                                    s.data = self.sensorDataDict[dataRequest.id]['data']
 
                         #  build the response
                         response = CamtrawlServer_pb2.msg()
@@ -475,7 +475,7 @@ class CamtrawlServer(QtCore.QObject):
 
         self.cameras = {}
         self.clients = {}
-        self.sensorData = {}
+        self.sensorDataDict = {}
 
         self.serverClosed.emit()
 
@@ -485,10 +485,10 @@ class CamtrawlServer(QtCore.QObject):
         '''The sensorDataAvailable slot buffers the most recent sensor data by
         sensor ID and header.
         '''
-        if id not in self.sensorData:
-            self.sensorData[id] = {}
+        if id not in self.sensorDataDict:
+            self.sensorDataDict[id] = {}
 
-        self.sensorData[id][header] = {'time':time_obj, 'data':data}
+        self.sensorDataDict[id][header] = {'time':time_obj, 'data':data}
 
 
     @QtCore.pyqtSlot(str, str, str, bool, str)

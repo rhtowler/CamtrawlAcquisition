@@ -251,7 +251,15 @@ class ImageWriter(QtCore.QObject):
             else:
                 #  send output to NULL
                 self.ffmpeg_out = None
-                self.ffmpeg_process = sp.Popen(command_args, stdin=sp.PIPE, stderr=sp.DEVNULL)
+                #  On windows, sending to DEVNULL seems to eventually cause the ffmpeg process to
+                #  hang. So here we'll try to write to a more portable devnull
+                if os.name == 'nt':
+                    self.ffmpeg_out = open(os.devnull, 'w')
+                    self.ffmpeg_process = sp.Popen(command_args, stdin=sp.PIPE, stderr=self.ffmpeg_out)
+                else:
+                    #  on linux, this seems to work perfectly fine so we'll not change it
+                    self.ffmpeg_process = sp.Popen(command_args, stdin=sp.PIPE, stderr=sp.DEVNULL)
+
 
             #  reset the frame counter and set the recording state
             self.frame_number = 0

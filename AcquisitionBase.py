@@ -136,11 +136,12 @@ class AcquisitionBase(QtCore.QObject):
         self.shutdownOnExit = False
         self.isExiting = False
         self.isAcquiring = False
+        self.isTriggering = False
         self.serverThread = None
         self.server = None
         self.system = None
         self.diskStatTimer = None
-        self.cameras = []
+        self.cameras = {}
         self.threads = []
         self.hw_triggered_cameras = []
         self.received = {}
@@ -321,7 +322,7 @@ class AcquisitionBase(QtCore.QObject):
         self.logger.info("Logging data to: " + self.base_dir)
 
         #  set the default_is_synchronous sensor data property
-        if self.configuration['sensors']['default_type'].lower in ['synchronous', 'syncd', 'sync']:
+        if self.configuration['sensors']['default_type'].lower in ['synchronous', 'syncd', 'sync', 'synced']:
             self.default_is_synchronous = True
         else:
             self.default_is_synchronous = False
@@ -411,7 +412,8 @@ class AcquisitionBase(QtCore.QObject):
 
             #  start the trigger timer. Set a long initial interval
             #  to allow the cameras time to finish getting ready.
-            self.triggerTimer.start(500)
+            self.isTriggering = True
+            self.triggerTimer.start(1000)
 
         else:
             #  no, something didn't work out so check if we're supposed to shut down.
@@ -467,7 +469,7 @@ class AcquisitionBase(QtCore.QObject):
         cameras according to the settings in the camera section of the configuration file.
         """
         #  initialize some properties
-        self.cameras = []
+        self.cameras = {}
         self.threads = []
         self.received = {}
         self.this_images = 1
@@ -561,7 +563,9 @@ class AcquisitionBase(QtCore.QObject):
                 sc.label = config['label']
 
                 #  set the camera trigger and saving dividers
+                sc.save_stills = config['save_stills']
                 sc.save_stills_divider = config['still_image_divider']
+                sc.save_video = config['save_video']
                 sc.save_video_divider = config['video_frame_divider']
                 sc.trigger_divider = config['trigger_divider']
                 self.logger.info(('    %s: trigger divider: %d  save image divider: %d' +
@@ -669,7 +673,7 @@ class AcquisitionBase(QtCore.QObject):
 
                 #  add this camera to our list of cameras and set the image
                 #  received state to false
-                self.cameras.append(sc)
+                self.cameras[sc.camera_name] = sc
                 self.received[sc.camera_name] = False
 
                 if config['save_stills']:
@@ -726,8 +730,8 @@ class AcquisitionBase(QtCore.QObject):
         '''
 
         #  reset the received image state for *all* cameras
-        for c in self.cameras:
-            self.received[c.camera_name] = False
+        for cam_name in self.cameras:
+            self.received[cam_name] = False
 
         #  note the trigger time
         self.trig_time = datetime.datetime.now()
@@ -748,10 +752,12 @@ class AcquisitionBase(QtCore.QObject):
             for header in self.sensorData[sensor_id]:
                 #  check if the data is fresh
                 freshness = self.trig_time - self.sensorData[sensor_id][header]['time']
-                if freshness.seconds <= self.configuration['sensors']['synchronous_timeout']:
+                if abs(freshness.total_seconds()) <= self.configuration['sensors']['synchronous_timeout']:
                     #  it is fresh enough. Write it to the db
                     self.db.insert_sync_data(self.n_images, self.sensorData[sensor_id][header]['time'],
                             sensor_id, header, self.sensorData[sensor_id][header]['data'])
+                else:
+                    print("NOT FRESH")
 
 
     @QtCore.pyqtSlot(str, str, dict)
@@ -770,14 +776,19 @@ class AcquisitionBase(QtCore.QObject):
             if self.use_db:
                 self.db.add_dropped(self.n_images, cam_name, self.trig_time)
         else:
-            #  we do have image data - we log this image to the images table
+            #  we do have image data - check if we should log this image to the images table
 
             #  Only store the image file name, no path info
             filename = Path(image_data['filename']).name
 
             if self.use_db:
-                self.db.add_image(self.n_images, cam_name, self.trig_time, filename,
-                        image_data['exposure'], image_data['gain'])
+                #  only write an entry in the images table if we have saved the
+                #  image in some way (as a still or a video frame)
+                if image_data['save_still'] or image_data['save_frame']:
+                    self.db.add_image(self.n_images, cam_name, self.trig_time, filename,
+                            image_data['exposure'], image_data['gain'], image_data['save_still'],
+                            image_data['save_frame'])
+
             log_str = (cam_name + ': Image Acquired: %dx%d  exp: %d  gain: %2.1f  filename: %s' %
                     (image_data['width'], image_data['height'], image_data['exposure'],
                     image_data['gain'], filename))
@@ -823,7 +834,8 @@ class AcquisitionBase(QtCore.QObject):
                         (self.this_images, elapsed_time_ms, next_int_time_ms))
 
                 #  start the next trigger timer
-                self.triggerTimer.start(next_int_time_ms)
+                if self.isTriggering:
+                    self.triggerTimer.start(next_int_time_ms)
 
 
     @QtCore.pyqtSlot(str, str)
@@ -905,13 +917,14 @@ class AcquisitionBase(QtCore.QObject):
         '''
 
         #  stop the trigger timer if it is running
+        self.isTriggering = False
         self.triggerTimer.stop()
 
         #  use the received dict to track the camera shutdown. When all
         #  cameras are True, we know all of them have reported that they
         #  have stopped recording.
-        for c in self.cameras:
-            self.received[c.camera_name] = False
+        for cam_name in self.cameras:
+            self.received[cam_name] = False
 
         #  set the exit and shutdown states
         self.isExiting = bool(exit_app)
@@ -1071,8 +1084,8 @@ class AcquisitionBase(QtCore.QObject):
         self.parameterChanged.connect(self.server.parameterDataAvailable)
 
         #  connect our cameras imageData signals to the server
-        for c in self.cameras:
-            c.imageData.connect(self.server.newImageAvailable)
+        for cam_name in self.cameras:
+            self.cameras[cam_name].imageData.connect(self.server.newImageAvailable)
 
         #  create a thread to run CamtrawlServer
         self.serverThread = QtCore.QThread(self)
@@ -1179,12 +1192,91 @@ class AcquisitionBase(QtCore.QObject):
     @QtCore.pyqtSlot(str, str)
     def GetParameterRequest(self, module, parameter):
 
-        pass
+        cam_names = list(self.received.keys())
+
+        #  split the parameter path
+        params = parameter.split('/')
+        if params[0] == '':
+            #  no parameter provided
+            return
+
+        if module.lower() == 'acquisition':
+
+            if params[0].lower() == 'camera_list':
+                #  build a comma separated list of cameras names and emit
+                param_value = ','.join(cam_names)
+                self.parameterChanged.emit(module, parameter, param_value, 1, '')
+
+            elif params[0].lower() == 'is_triggering':
+                #  emit "1" if we're currently triggering and "0" if not
+                self.parameterChanged.emit(module, parameter, str(int(self.isTriggering)), 1, '')
+
+            #  check if the first param path element is a camera
+            elif params[0] in cam_names:
+
+                #  make sure we have a parameter for this camera
+                if len(params) < 2:
+                    return
+
+                if params[1].lower() == 'gain':
+                    param_value = self.cameras[params[0]].get_gain()
+                    if param_value:
+                        self.parameterChanged.emit(module, parameter, str(param_value), 1, '')
+
+                elif params[1].lower() == 'exposure':
+                    param_value = self.cameras[params[0]].get_exposure()
+                    if param_value:
+                        self.parameterChanged.emit(module, parameter, str(param_value), 1, '')
+
 
     @QtCore.pyqtSlot(str, str, str)
     def SetParameterRequest(self, module, parameter, value):
 
-        pass
+        cam_names = list(self.received.keys())
+
+        #  split the parameter path
+        params = parameter.split('/')
+        if params[0] == '':
+            #  no parameter provided
+            return
+
+        if module.lower() == 'acquisition':
+
+            if params[0].lower() == 'start_triggering':
+                if not self.isTriggering:
+                    self.isTriggering = True
+                    self.triggerTimer.start(250)
+                self.parameterChanged.emit(module, 'is_triggering', str(int(self.isTriggering)), 1, '')
+
+            elif params[0].lower() == 'stop_triggering':
+                if self.isTriggering:
+                    self.isTriggering = False
+                self.parameterChanged.emit(module, 'is_triggering', str(int(self.isTriggering)), 1, '')
+
+            elif params[0] in cam_names:
+
+                #  make sure we have a parameter for this camera
+                if len(params) < 2:
+                    return
+
+                if params[1].lower() == 'gain':
+                    try:
+                        ok = self.cameras[params[0]].set_gain(float(value))
+                        if ok:
+                            param_value = self.cameras[params[0]].get_gain()
+                            self.parameterChanged.emit(module, parameter, str(param_value), 1, '')
+                    except:
+                        pass
+
+                elif params[1].lower() == 'exposure':
+                    try:
+                        ok = self.cameras[params[0]].set_exposure(int(value))
+                        if ok:
+                            param_value = self.cameras[params[0]].get_exposure()
+                            self.parameterChanged.emit(module, parameter, str(param_value), 1, '')
+                    except:
+                        pass
+
 
 
     @QtCore.pyqtSlot(str, str, datetime.datetime, str)

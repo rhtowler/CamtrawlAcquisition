@@ -116,6 +116,7 @@ class CamtrawlAcquisition(AcquisitionBase):
                 #  If we're here we know we're using software triggering so start
                 #  the trigger timer. We'll set a long first interval to give the
                 #  cameras a little more time to get ready.
+                self.isTriggering = True
                 self.triggerTimer.start(500)
 
             else:
@@ -208,6 +209,9 @@ class CamtrawlAcquisition(AcquisitionBase):
                 if self.configuration['server']['start_server']:
                     self.StartServer()
 
+                #  now connect the controller's sensorData signal to the server
+                self.controller.sensorData.connect(self.server.sensorDataAvailable)
+
             else:
                 #  something went wrong during startup. The error has already been logged
                 #  but we need to exit the app appropriately. If the system is in any other
@@ -270,6 +274,7 @@ class CamtrawlAcquisition(AcquisitionBase):
 
             self.logger.info("System operating in forced trigger mode - starting triggering...")
             self.internalTriggering = True
+            self.isTriggering = True
             #  The first trigger interval is long to ensure the cameras are ready
             self.triggerTimer.start(500)
 
@@ -279,6 +284,7 @@ class CamtrawlAcquisition(AcquisitionBase):
 
             self.logger.info("System operating in deployed mode (@depth) - starting triggering...")
             self.internalTriggering = True
+            self.isTriggering = True
             #  The first trigger interval is long to ensure the cameras are ready
             self.triggerTimer.start(500)
 
@@ -287,6 +293,7 @@ class CamtrawlAcquisition(AcquisitionBase):
 
             self.logger.info("System operating in deployed mode (p-switch) - starting triggering...")
             self.internalTriggering = True
+            self.isTriggering = True
             #  The first trigger interval is long to ensure the cameras are ready
             self.triggerTimer.start(500)
 
@@ -414,7 +421,10 @@ class CamtrawlAcquisition(AcquisitionBase):
 
         # now we work through our configured cameras and set up some Camtrawl
         # controller specific bits.
-        for sc in self.cameras:
+        for cam_name in self.cameras:
+
+            #  get a reference to our spinCamera object
+            sc = self.cameras[cam_name]
 
             # get the configuration for this camera.
             _, config = self.GetCameraConfiguration(sc.camera_name)

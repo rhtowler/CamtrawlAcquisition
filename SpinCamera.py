@@ -125,6 +125,8 @@ class SpinCamera(QtCore.QObject):
         self.n_triggered = 0
         self.total_triggers = 0
         self.save_stills_divider = 1
+        self.save_stills = True
+        self.save_video = False
         self.save_video_divider = 1
         self.trigger_divider = 1
         self.dbResponse = None
@@ -328,8 +330,8 @@ class SpinCamera(QtCore.QObject):
             return
 
         #  reset the save still image and save video frame state vars
-        self.save_this_still = True
-        self.save_this_frame = True
+        self.save_this_still = self.save_stills
+        self.save_this_frame = self.save_video
 
         #  increment the internal trigger counter
         self.total_triggers += 1
@@ -501,9 +503,10 @@ class SpinCamera(QtCore.QObject):
         image_data['filename'] = self.filenames[idx]
         image_data['image_number'] = self.image_number
 
-        #  add the save_still and save_frame states - this is used exclusively
-        #  by the image_writer to determine if an image should be written as
-        #  an image file and/or a video frame.
+        #  add the save_still and save_frame states - this is used by
+        #  the image_writer to determine if an image should be written as
+        #  an image file and/or a video frame and it is logged in the
+        #  database images table to track stills and frames saved.
         image_data['save_still'] = self.save_this_still
         image_data['save_frame'] = self.save_this_frame
 
