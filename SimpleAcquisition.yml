@@ -19,7 +19,7 @@ application:
 acquisition:
 
     trigger_rate: 5
-    trigger_limit: 500
+    trigger_limit: 50
 
 
 server:
@@ -42,11 +42,12 @@ cameras:
 
     default:
 
-        gain: 15
-        exposure_us: 6000
+        gain: 25
+        exposure_us: 3000
         label: camera
         # values: none, cw90, cw180, cw270, fliplr, flipud
         rotation:  None
+        sensor_binning: 1
 
         save_stills: True
         still_image_extension: .jpg

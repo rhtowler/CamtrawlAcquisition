@@ -728,24 +728,64 @@ class SpinCamera(QtCore.QObject):
 
 
     def set_binning(self, bin_value):
+        '''
+        set_binning enables pixel binning on the camera (if supported).
+        Binning increases the sensitivity of the camera at the expense of
+        resolution.
+
+        Valid bin values are 1 (disabled), 2, and possibly 4 or even 8
+        depending on your camera's sensor
+        '''
 
         result = True
 
         try:
-            #  set binning for values > 1 otherwise we disable binning (set it to 1)
-            if bin_value in [2,4,8,16]:
-                #  First need to disable auto exposure
-                if bin_value > self.cam.BinningVertical.GetMax():
-                    bin_value = self.cam.BinningVertical.GetMax()
 
-                #  set the vertical binning. On the Flir cameras I have, horizontal
-                #  binning is RO and is linked to vertical so you don't need to set
-                #  horizontal binning.
-                self.cam.BinningVertical.SetValue(bin_value)
+            # Not all cameras support both vertical and horizontal
+            # binning and of those that do, sometimes horizontal is
+            # linked to vertical and is not writable so we have to
+            # check if the nodes exist and are writable.
 
-            else:
-                #  disable binning
-                self.cam.BinningVertical.SetValue(1)
+            #  first get the nodemap
+            nodemap = self.cam.GetNodeMap()
+
+            #  Get the vertical binning node
+            node = nodemap.GetNode('BinningVertical')
+            #  check if it exists and is writable
+            if self.check_node_accessibility(node):
+                #  check if we should set or disable binning
+                if bin_value in [2,4,8,16]:
+                    #  clamp the bin value to the max
+                    if bin_value > self.cam.BinningVertical.GetMax():
+                        bin_value = self.cam.BinningVertical.GetMax()
+                    #  set the vertical binning.
+                    self.cam.BinningVertical.SetValue(bin_value)
+                else:
+                    #  disable binning
+                    self.cam.BinningVertical.SetValue(1)
+
+                #  now make sure the height is set correctly. The height
+                #  will automatically be reduced when increasing binning
+                #  but it will not be increased when you reduce or disable
+                #  binning so we force it here.
+                node = nodemap.GetNode('Height')
+                if self.check_node_accessibility(node):
+                    self.cam.Height.SetValue(self.cam.HeightMax.GetValue())
+
+
+            #  now do the same thing for horizontal binning
+            node = nodemap.GetNode('BinningHorizontal')
+            if self.check_node_accessibility(node):
+                if bin_value in [2,4,8,16]:
+                    if bin_value > self.cam.BinningHorizontal.GetMax():
+                        bin_value = self.cam.BinningHorizontal.GetMax()
+                    self.cam.BinningHorizontal.SetValue(bin_value)
+                else:
+                    self.cam.BinningHorizontal.SetValue(1)
+
+                node = nodemap.GetNode('Width')
+                if self.check_node_accessibility(node):
+                    self.cam.Width.SetValue(self.cam.WidthMax.GetValue())
 
         except PySpin.SpinnakerException as ex:
             self.error.emit(self.camera_name, 'Error: %s' % ex)
@@ -755,6 +795,11 @@ class SpinCamera(QtCore.QObject):
 
 
     def get_binning(self):
+
+        #  we'll assume that binning has been set on the camera by this
+        #  class which means both the vertical and horizontal binning
+        #  will be the same. Thus we just read the vertical binning
+        #  and return that.
 
         try:
             binning = self.cam.BinningVertical.GetValue()
