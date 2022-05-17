@@ -455,7 +455,7 @@ class CamtrawlClient(QtCore.QObject):
             return
 
         #  once connected, we query the camera info - once we receive the info
-        #  we will emit the "connected" signal so the client applicaiton knows
+        #  we will emit the "connected" signal so the client application knows
         #  it can start requesting data.
         request = CamtrawlServer_pb2.msg()
         request.type = CamtrawlServer_pb2.msg.msgType.Value('GETCAMERAINFO')

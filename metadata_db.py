@@ -113,12 +113,16 @@ class metadata_db(QtCore.QObject):
 
 
     def add_image(self, image_num, cam_name, trig_time, image_filename, exposure,
-            gain, save_still, save_frame, discarded=0, md5=None):
+            gain, save_still, save_frame, discarded=None, md5=None):
 
         if not md5:
             md5 = 'NULL'
         else:
             md5 = "'" + md5 + "'"
+        if not discarded:
+            discarded = 'NULL'
+        else:
+            discarded = 1
 
         #  convert bools to ints
         save_still = int(save_still)
@@ -128,6 +132,22 @@ class metadata_db(QtCore.QObject):
         sql = ("INSERT INTO images VALUES(" + str(image_num) + ",'" + cam_name + "','" + time_str + "','" +
                 image_filename + "'," + str(exposure) + "," + str(gain) + "," + str(save_still) + ',' +
                 str(save_frame) + ',' + str(discarded) + ',' + md5 + ")")
+        query = QtSql.QSqlQuery(sql, self.db)
+        query.exec_()
+
+
+    def set_image_extension(self, extension):
+
+        sql = ("INSERT INTO deployment_data (deployment_parameter,parameter_value) " +
+                "VALUES ('image_file_type','" + extension + "')")
+        query = QtSql.QSqlQuery(sql, self.db)
+        query.exec_()
+
+
+    def set_video_extension(self, extension):
+
+        sql = ("INSERT INTO deployment_data (deployment_parameter,parameter_value) " +
+                "VALUES ('video_file_type','" + extension + "')")
         query = QtSql.QSqlQuery(sql, self.db)
         query.exec_()
 

@@ -33,6 +33,7 @@
 
 from PyQt5 import QtCore
 import os
+import logging
 import datetime
 from time import sleep
 import PySpin
@@ -132,6 +133,7 @@ class SpinCamera(QtCore.QObject):
         self.dbResponse = None
         self.label = 'camera'
         self.ND_pixelFormat = PySpin.PixelFormat_BGR8 #PySpin.PixelFormat_BGR16
+        self.logger = logging.getLogger('Acquisition')
 
         # Retrieve TL device nodemap and extract device information
         nodemap_tldevice = self.cam.GetTLDeviceNodeMap()
@@ -324,6 +326,10 @@ class SpinCamera(QtCore.QObject):
         Both the save_image and emit_signal arguments will override these same settings
         for the individual HDR exposures (and merged
         '''
+
+        self.logger.debug("%s triggered: Image number %d Save image: %s" %
+                (self.camera_name, image_number, save_image))
+
 
         #  don't do anything if we're not acquiring
         if not self.acquiring:

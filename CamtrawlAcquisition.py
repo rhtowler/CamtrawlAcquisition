@@ -36,6 +36,7 @@
 
 import os
 import shutil
+import datetime
 from AcquisitionBase import AcquisitionBase
 from PyQt5 import QtCore
 import CamtrawlController
@@ -65,6 +66,7 @@ class CamtrawlAcquisition(AcquisitionBase):
         self.HWTriggerHDR = {}
         self.controller_port = {}
         self.controllerCurrentState = 0
+        self.readyToTrigger = {}
 
         # Add default config values for the controller and sensor integration
         # that CamtrawlAcquisition adds to AcquisitionBase.
@@ -85,63 +87,56 @@ class CamtrawlAcquisition(AcquisitionBase):
 
     def AcquisitionSetup2(self):
         '''
-        AcquisitionSetup2 handles the last details of startup and what to do
-        if we have a problem with the cams or disk.
+        AcquisitionSetup2 completes setup by starting the controller,
+        configuring the cameras and then starting acquisition. The application
+        will exit here if there are any issues encountered during setup.
         '''
 
-        #  If we're using the controller we need to connect to it first before
-        #  we can finish acting on the camera and disk states. If we're not
-        #  using the controller we can handle everything here.
-
+        #  check if we're using the controller
         if self.configuration['controller']['use_controller']:
-
-            #  Create and start the controller object. It will emit a
-            #  ChangedState signal after it connects to the device and queries
-            #  the state.
+            #  we are, start it.
             self.StartController()
 
+        #  if the free space is ok, configure the cameras
+        if self.disk_ok:
+            self.cam_ok = self.ConfigureCameras()
+            if not self.cam_ok:
+                #  we were unable to find any cameras
+                self.logger.critical("CRITICAL ERROR: Unable to find any cameras. " +
+                        "The application will exit.")
         else:
+            self.cam_ok = False
 
-            #  if we're not using the controller, we check if we have at least one
-            #  camera configured and some disk space to use.
-            if self.cam_ok and self.disk_ok:
-                #  the cameras are ready to acquire and we have some disk space.
-                #  Set the isAcquiring property
-                self.isAcquiring = True
+        #  check if everything is ok
+        if self.cam_ok and self.disk_ok:
+            #  the cameras are ready to acquire. Set the isAcquiring property
+            self.isAcquiring = True
 
-                #  start the server, if enabled
-                if self.configuration['server']['start_server']:
-                    self.StartServer()
+            #  start the trigger timer. Set a long initial interval
+            #  to allow the cameras time to finish getting ready.
+            self.isTriggering = True
+            self.triggerTimer.start(1000)
 
-                #  If we're here we know we're using software triggering so start
-                #  the trigger timer. We'll set a long first interval to give the
-                #  cameras a little more time to get ready.
-                self.isTriggering = True
-                self.triggerTimer.start(500)
+        else:
+            #  no, something didn't work out so check if we're supposed to shut down.
+            #  If so, we will delay the shutdown to allow the user to exit the app
+            #  before the PC shuts down and correct the problem.
+            if self.configuration['application']['shut_down_on_exit']:
+                self.logger.error("Shutdown on exit is set. The PC will shut down in 5 minutes.")
+                self.logger.error("You can exit the application by pressing CTRL-C to " +
+                        "circumvent the shutdown and keep the PC running.")
+
+                #  set the shutdownOnExit attribute so we, er shutdown on exit
+                self.shutdownOnExit = True
+
+                #  complete setup of our shutdown timer and start it
+                self.shutdownTimer.timeout.connect(self.AcqisitionTeardown)
+                #  delay shutdown for 5 minutes
+                self.shutdownTimer.start(5000 * 60)
 
             else:
-                #  something went wrong during startup. The error has already been logged
-                #  but we need to exit the app appropriately.
-
-                #  Check if we're supposed to shutdown on exit. If so, we will delay the
-                #  shutdown to allow the user to exit the app before the PC shuts down
-                #  and correct the problem.
-                if self.configuration['application']['shut_down_on_exit']:
-                    self.logger.critical("Shutdown on exit is set. The PC will shut down in 5 minutes.")
-                    self.logger.critical("You can exit the application by pressing CTRL-C to " +
-                            "circumvent the shutdown and keep the PC running.")
-
-                    #  set the shutdownOnExit attribute so we, er shutdown on exit
-                    self.shutdownOnExit = True
-
-                    #  finish setting up the shutdown timer and start
-                    self.shutdownTimer.timeout.connect(self.AcqisitionTeardown)
-                    #  delay shutdown for 5 minutes
-                    self.shutdownTimer.start(5000 * 60)
-
-                else:
-                    #  Stop acquisition and close the app
-                    self.StopAcquisition(exit_app=True, shutdown_on_exit=False)
+                #  Stop acquisition and close the app
+                self.StopAcquisition(exit_app=True, shutdown_on_exit=False)
 
 
     def StartController(self):
@@ -162,6 +157,7 @@ class CamtrawlAcquisition(AcquisitionBase):
 
         #  connect its signals
         self.controller.sensorData.connect(self.SensorDataAvailable)
+        self.controller.parameterData.connect(self.ControllerParamData)
         self.controller.systemState.connect(self.ControllerStateChanged)
         self.controller.error.connect(self.ControllerError)
 
@@ -171,6 +167,42 @@ class CamtrawlAcquisition(AcquisitionBase):
         self.controllerStarting = True
         self.controllerCurrentState = 0
         self.controller.startController()
+
+
+    @QtCore.pyqtSlot(str, str, datetime.datetime, dict)
+    def ControllerParamData(self, sensor_id, header, rx_time, data):
+        '''
+        ControllerParamData slot is called when the Camtrawl controller
+        emits controller parameter messages. We are currently only requesting
+        these at system startup and are only logging them for the record.
+        '''
+
+        if header == 'getP2DParms':
+            if data['mode'] in [1,2]:
+                self.logger.info("Pressure sensor is installed.")
+                if data['mode'] == 1:
+                    self.logger.info("    Type: PA4-LD")
+                else:
+                    self.logger.info("    Type: Analog")
+                self.logger.info("    Depth conversion slope: %8.4f" % (data['slope']))
+                self.logger.info("    Depth conversion offset: %8.4f" % (data['intercept']))
+                self.logger.info("    System turn-on depth: %d" % (data['turn_on_depth']))
+                self.logger.info("    System turn-off depth: %d" % (data['turn_off_depth']))
+            else:
+                self.logger.info("Pressure sensor is not installed.")
+
+        elif header == 'getStartupVoltage':
+
+            if data['enabled'] > 0:
+                self.logger.info("System voltage monitoring enabled.")
+                self.logger.info("    Startup voltage threshold: %8.4f" % (data['startup_threshold']))
+            else:
+                self.logger.info("System voltage monitoring disabled.")
+
+        elif header == 'getShutdownVoltage':
+
+            if data['enabled'] > 0:
+                self.logger.info("    Shutdown voltage threshold: %8.4f" % (data['shutdown_threshold']))
 
 
     @QtCore.pyqtSlot(int)
@@ -198,6 +230,12 @@ class CamtrawlAcquisition(AcquisitionBase):
 
             #  next, tell the controller we're ready
             self.controller.sendReadySignal()
+
+            #  and request a few controller parameters so they are logged for this
+            #  acquisition session.
+            self.controller.getP2DParameters()
+            self.controller.getStartupVoltage()
+            self.controller.getShutdownVoltage()
 
             #  finish the setup by dealing with the camera and disk states
             if self.cam_ok and self.disk_ok:
@@ -253,8 +291,7 @@ class CamtrawlAcquisition(AcquisitionBase):
                 return
 
         if self.controllerCurrentState == new_state:
-            #  If the state hasn't changed we just return. This wouldn't
-            #  normally happen
+            #  If the state hasn't changed we just return. This wouldn't normally happen
             return
 
         self.logger.info("Camtrawl controller state changed. New state is " +
@@ -397,7 +434,6 @@ class CamtrawlAcquisition(AcquisitionBase):
                 self.configuration['controller']['serial_port'] + " baud: " +
                 str(self.configuration['controller']['baud_rate']))
             self.logger.critical("    ERROR: " + error)
-            print("Application exiting...")
             #TODO: Need to clean up this exit path - there is still a thread
             #      running when we exit here
             self.StopAcquisition(exit_app=True)
@@ -460,9 +496,9 @@ class CamtrawlAcquisition(AcquisitionBase):
         super().AcqisitionTeardown()
 
         #  clean up some CamtrawlAcquisition specific objects
-        del self.readyToTrigger
-        del self.HWTriggerHDR
-        del self.controller_port
+        self.readyToTrigger = {}
+        self.HWTriggerHDR = {}
+        self.controller_port = {}
 
 
     @QtCore.pyqtSlot()
@@ -505,6 +541,9 @@ class CamtrawlAcquisition(AcquisitionBase):
         ready, we call the CamtrawlController's trigger method which will trigger
         the strobes and the cameras.
         '''
+
+        #  for debugging, indicate that this camera is ready
+        self.logger.debug(cam.camera_name + ":  Ready to hardware trigger")
 
         #  update some state info for this camera
         self.readyToTrigger[cam] = True

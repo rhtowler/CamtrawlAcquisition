@@ -116,6 +116,10 @@ class AcquisitionBase(QtCore.QObject):
     #  cannot be opened.
     MAX_DB_ALTERNATES = 100
 
+    #  specify how long to wait (in ms) after triggering to force another trigger.
+    #  This should be at a minimum 2x your exposure + data transfer time.
+    ACQUISITION_TIMEOUT = 1000
+
     def __init__(self, config_file=None, profiles_file=None, parent=None):
 
         super(AcquisitionBase, self).__init__(parent)
@@ -185,6 +189,11 @@ class AcquisitionBase(QtCore.QObject):
         self.triggerTimer.setSingleShot(True)
         self.triggerTimer.setTimerType(QtCore.Qt.PreciseTimer)
 
+        #  create the trigger timer
+        self.timeoutTimer = QtCore.QTimer(self)
+        self.timeoutTimer.timeout.connect(self.TriggerTimeout)
+        self.timeoutTimer.setSingleShot(True)
+
         #  create the shutdown timer - this is used to delay application
         #  shutdown when no cameras are found. It allows the user to exit
         #  the application and fix the issue when the application is set
@@ -245,7 +254,7 @@ class AcquisitionBase(QtCore.QObject):
                 os.makedirs(self.log_dir)
 
             #  create the logger
-            self.logger = logging.getLogger(__name__)
+            self.logger = logging.getLogger('Acquisition')
             self.logger.propagate = False
             self.logger.setLevel(self.configuration['application']['log_level'])
             fileHandler = logging.FileHandler(logfile_name)
@@ -365,6 +374,22 @@ class AcquisitionBase(QtCore.QObject):
             #  we're not checking the disk free space
             self.disk_ok = True
 
+        #  start the server, if enabled
+        if self.configuration['server']['start_server']:
+            self.StartServer()
+
+        #  contine camera setup in another method so we can override that method
+        #  in a subclass and aloow for additional pre-camera setup.
+        self.AcquisitionSetup2()
+
+
+    def AcquisitionSetup2(self):
+        '''
+        AcquisitionSetup2 completes setup by configuring the cameras and
+        starting acquisition. The application will exit here if there are
+        any issues encountered during setup.
+        '''
+
         #  if the free space is ok, configure the cameras
         if self.disk_ok:
             self.cam_ok = self.ConfigureCameras()
@@ -375,40 +400,10 @@ class AcquisitionBase(QtCore.QObject):
         else:
             self.cam_ok = False
 
-
-        #  At this point we should know if we have at least one camera to use
-        #  and some free disk space but what we do next may depend on how the
-        #  child class is implemented. We'll finish setup in another method so
-        #  we can override it as needed in child classes to handle their unique
-        #  setup requirements.
-        #
-        #  If we have at least one camera available we delay calling this method
-        #  to give the cameras time to start. This really just makes the log linear
-        #  since the camera threads will log their start before anything is logged
-        #  in AcquisitionSetup2. This makes the log more readable.
-        setupDelayTimer = QtCore.QTimer(self)
-        setupDelayTimer.timeout.connect(self.AcquisitionSetup2)
-        setupDelayTimer.setSingleShot(True)
-        if self.cam_ok:
-            setupDelayTimer.start(250)
-        else:
-            setupDelayTimer.start(0)
-
-
-    def AcquisitionSetup2(self):
-        '''
-        AcquisitionSetup2 handles the last details of startup and what to do
-        if we have a problem with the cams or disk.
-        '''
-
         #  check if everything is ok
         if self.cam_ok and self.disk_ok:
             #  the cameras are ready to acquire. Set the isAcquiring property
             self.isAcquiring = True
-
-            #  start the server, if enabled
-            if self.configuration['server']['start_server']:
-                self.StartServer()
 
             #  start the trigger timer. Set a long initial interval
             #  to allow the cameras time to finish getting ready.
@@ -679,10 +674,16 @@ class AcquisitionBase(QtCore.QObject):
                 if config['save_stills']:
                     self.logger.info('    %s: Saving stills as %s  Scale: %i' % (sc.camera_name,
                             image_options['file_ext'], image_options['scale']))
+                    if self.use_db:
+                        #  update the deployment_data table with the image file type
+                        self.db.set_image_extension(image_options['file_ext'])
 
                 if config['save_video']:
                     self.logger.info('    %s: Saving video as %s  Video profile: %s' % (sc.camera_name,
                             video_profile['file_ext'], config['video_preset']))
+                    if self.use_db:
+                        #  update the deployment_data table with the video file type
+                        self.db.set_video_extension(video_profile['file_ext'])
 
                 #  issue a warning if a camera is not saving any image data
                 if config['save_video'] or config['save_stills']:
@@ -713,6 +714,23 @@ class AcquisitionBase(QtCore.QObject):
 
 
     @QtCore.pyqtSlot()
+    def TriggerTimeout(self):
+        '''
+        The TriggerTimeout slot is called by the trigger timeout timer. This
+        method simply calls the TriggerCameras method again in a heroic attempt
+        to keep acquiring data after an unhandled issue causes acquisition to
+        stall.
+        '''
+
+        #  We've timed out. Issue a warning in the log
+        self.logger.warning("WARNING: Trigger timeout. One or more cameras failed " +
+                "to respond after being triggered.")
+
+        #  and try triggering again.
+        self.TriggerCameras()
+
+
+    @QtCore.pyqtSlot()
     def TriggerCameras(self):
         '''
         The TriggerCameras slot is called by the trigger timer and will "trigger"
@@ -736,6 +754,10 @@ class AcquisitionBase(QtCore.QObject):
         #  note the trigger time
         self.trig_time = datetime.datetime.now()
 
+        #  start the trigger timeout timer. This timer ensures that if acquisition
+        #  stalls for some unhandled reason, we'll keep trying.
+        self.timeoutTimer.start(self.ACQUISITION_TIMEOUT)
+
         #  emit the trigger signal to trigger the cameras
         self.trigger.emit([], self.n_images, self.trig_time, True, True)
 
@@ -756,8 +778,6 @@ class AcquisitionBase(QtCore.QObject):
                     #  it is fresh enough. Write it to the db
                     self.db.insert_sync_data(self.n_images, self.sensorData[sensor_id][header]['time'],
                             sensor_id, header, self.sensorData[sensor_id][header]['data'])
-                else:
-                    print("NOT FRESH")
 
 
     @QtCore.pyqtSlot(str, str, dict)
@@ -805,11 +825,17 @@ class AcquisitionBase(QtCore.QObject):
         #  note that this camera has completed the trigger event
         self.received[cam_obj.camera_name] = True
 
+        #  enit some debugging info
+        self.logger.debug(cam_obj.camera_name + ': Trigger Complete.')
+
         #  check if all triggered cameras have completed the trigger sequence
         if (all(self.received.values())):
             #  all cameras are done. Increment our counters
             self.n_images += 1
             self.this_images += 1
+
+            #  cancel our timeout timer
+            self.timeoutTimer.stop()
 
             #  check if we're configured for a limited number of triggers
             if ((self.configuration['acquisition']['trigger_limit'] > 0) and
@@ -830,11 +856,12 @@ class AcquisitionBase(QtCore.QObject):
                 if next_int_time_ms < 0:
                     next_int_time_ms = 0
 
-                self.logger.debug("Trigger %d. Last interval (ms)=%8.4f  Next trigger (ms)=%8.4f" %
-                        (self.this_images, elapsed_time_ms, next_int_time_ms))
+                self.logger.debug("Trigger %d completed. Last interval %8.4f ms" %
+                        (self.this_images, elapsed_time_ms))
 
                 #  start the next trigger timer
                 if self.isTriggering:
+                    self.logger.debug("Next trigger in  %8.4f ms." % (next_int_time_ms))
                     self.triggerTimer.start(next_int_time_ms)
 
 
@@ -916,9 +943,10 @@ class AcquisitionBase(QtCore.QObject):
         have responded to the stopAcquiring signal.
         '''
 
-        #  stop the trigger timer if it is running
+        #  stop the trigger and timeout timers
         self.isTriggering = False
         self.triggerTimer.stop()
+        self.timeoutTimer.stop()
 
         #  use the received dict to track the camera shutdown. When all
         #  cameras are True, we know all of them have reported that they
@@ -965,9 +993,9 @@ class AcquisitionBase(QtCore.QObject):
         #  objects so Spinnaker can clean up behind the scenes. If we don't
         #  PySpin.system.ReleaseInstance() raises an error.
         self.logger.debug("Cleaning up references to Spinnaker objects...")
-        del self.received
-        del self.hw_triggered_cameras
-        del self.cameras
+        self.received = {}
+        self.hw_triggered_cameras = []
+        self.cameras = {}
 
         #  wait just a bit to allow the Python GC to finish cleaning up.
         delayTimer = QtCore.QTimer(self)
@@ -997,14 +1025,14 @@ class AcquisitionBase(QtCore.QObject):
 
             #  execute the "shutdown later" command
             if os.name == 'nt':
-                #  on windows we can simply call shutdown and delay 12 seconds
-                subprocess.Popen(["shutdown", "-s", "-t", "12"],
+                #  on windows we can simply call shutdown and delay 10 seconds
+                subprocess.Popen(["shutdown", "-s", "-t", "10"],
                         creationflags=subprocess.DETACHED_PROCESS |
                         subprocess.CREATE_NEW_PROCESS_GROUP)
             else:
                 #  on linux we have a script we use to delay the shutdown.
                 #  Since the shutdown command can't delay less than one minute,
-                #  we use a script to delay 5 seconds and then call shutdown.
+                #  we use a script to delay 10 seconds and then call shutdown.
                 #
                 #  You must add an entry in the sudoers file to allow the user running this
                 #  application to execute the shutdown command without a password. For example
@@ -1066,10 +1094,22 @@ class AcquisitionBase(QtCore.QObject):
                 self.configuration['server']['server_interface'] + ":" +
                 str(self.configuration['server']['server_port']))
 
+        #  create a dict to pass to the server keyed by camera name that
+        #  contains a dicts with a 'label' key which is used by the server
+        #  to identify available cameras and store the most recent image
+        #  from those cameras. This is not required, but if this isn't
+        #  passed during init, the server will only become aware of the
+        #  camera when it receives an image which gets awkward if you
+        #  connect to the server before any images are acquired.
+        server_cam_dict = {}
+        for cam in self.cameras.keys():
+            server_cam_dict[cam] = {'label':self.cameras[cam].label}
+
         #  create an instance of CamtrawlServer
         self.server = CamtrawlServer.CamtrawlServer(
                 self.configuration['server']['server_interface'],
-                self.configuration['server']['server_port'])
+                self.configuration['server']['server_port'],
+                cameras=server_cam_dict)
 
         #  connect the server's signals. Connect both the sync and async signals
         #  to the same method since we use our configuration file to figure out
@@ -1270,7 +1310,7 @@ class AcquisitionBase(QtCore.QObject):
 
                 elif params[1].lower() == 'exposure':
                     try:
-                        ok = self.cameras[params[0]].set_exposure(int(value))
+                        ok = self.cameras[params[0]].set_exposure(float(value))
                         if ok:
                             param_value = self.cameras[params[0]].get_exposure()
                             self.parameterChanged.emit(module, parameter, str(param_value), 1, '')
@@ -1278,12 +1318,10 @@ class AcquisitionBase(QtCore.QObject):
                         pass
 
 
-
     @QtCore.pyqtSlot(str, str, datetime.datetime, str)
     def SensorDataAvailable(self, sensor_id, header, rx_time, data):
         '''
         The SensorDataAvailable slot is called when sensor data is received.
-
 
         CamtrawlAcquisition lumps sensor data into 2 groups. Synced sensor data
         is cached when received and then logged to the database when the cameras

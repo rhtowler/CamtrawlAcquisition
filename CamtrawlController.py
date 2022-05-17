@@ -1,7 +1,39 @@
-#!/usr/bin/env python3
-'''
+# coding=utf-8
 
-'''
+#     National Oceanic and Atmospheric Administration (NOAA)
+#     Alaskan Fisheries Science Center (AFSC)
+#     Resource Assessment and Conservation Engineering (RACE)
+#     Midwater Assessment and Conservation Engineering (MACE)
+
+#  THIS SOFTWARE AND ITS DOCUMENTATION ARE CONSIDERED TO BE IN THE PUBLIC DOMAIN
+#  AND THUS ARE AVAILABLE FOR UNRESTRICTED PUBLIC USE. THEY ARE FURNISHED "AS
+#  IS."  THE AUTHORS, THE UNITED STATES GOVERNMENT, ITS INSTRUMENTALITIES,
+#  OFFICERS, EMPLOYEES, AND AGENTS MAKE NO WARRANTY, EXPRESS OR IMPLIED,
+#  AS TO THE USEFULNESS OF THE SOFTWARE AND DOCUMENTATION FOR ANY PURPOSE.
+#  THEY ASSUME NO RESPONSIBILITY (1) FOR THE USE OF THE SOFTWARE AND
+#  DOCUMENTATION; OR (2) TO PROVIDE TECHNICAL SUPPORT TO USERS.
+
+"""
+.. module:: CamtrawlAcquisition.CamtrawlController
+
+    :synopsis: CamtrawlController provides a simple interface for
+               interacting with the Camtrawl system power and IO
+               board (aka the Camtrawl controller). The controller
+               provides power control, sensor integration, and
+               hardware camera and strobe triggers for the
+               Camtrawl system.
+
+| Developed by:  Rick Towler   <rick.towler@noaa.gov>
+| National Oceanic and Atmospheric Administration (NOAA)
+| National Marine Fisheries Service (NMFS)
+| Alaska Fisheries Science Center (AFSC)
+| Midwater Assesment and Conservation Engineering Group (MACE)
+|
+| Author:
+|       Rick Towler   <rick.towler@noaa.gov>
+| Maintained by:
+|       Rick Towler   <rick.towler@noaa.gov>
+"""
 
 import datetime
 import logging
@@ -18,6 +50,7 @@ class CamtrawlController(QtCore.QObject):
 
     #  define CamtrawlController signals
     sensorData = QtCore.pyqtSignal(str, str, datetime.datetime, str)
+    parameterData = QtCore.pyqtSignal(str, str, datetime.datetime, dict)
     systemState = QtCore.pyqtSignal(int)
     txSerialData = QtCore.pyqtSignal(str, str)
     error = QtCore.pyqtSignal(str,str)
@@ -41,9 +74,7 @@ class CamtrawlController(QtCore.QObject):
 
         super(CamtrawlController, self).__init__(parent)
 
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.DEBUG)
-
+        self.logger = logging.getLogger('Acquisition')
         self.isRunning = False
 
         #  set the serial port poroperties
@@ -93,7 +124,7 @@ class CamtrawlController(QtCore.QObject):
         self.deviceParams['thread'].finished.connect(self.threadFinished)
         self.deviceParams['thread'].finished.connect(self.deviceParams['thread'].deleteLater)
 
-        self.logger.debug("Starting CamtrawlController. Port: " + self.deviceParams['port'] +
+        self.logger.info("Starting CamtrawlController. Port: " + self.deviceParams['port'] +
                 "   Baud: " + str(self.deviceParams['baud']))
 
         #  queue up a controller state request - this will not be sent until
@@ -118,7 +149,7 @@ class CamtrawlController(QtCore.QObject):
           terminate the thread.
 
         """
-        self.logger.debug("Stopping CamtrawlController...")
+        self.logger.info("Stopping CamtrawlController...")
         self.stopDevice.emit([self.deviceParams['deviceName']])
 
 
@@ -335,10 +366,179 @@ class CamtrawlController(QtCore.QObject):
         dataBits = data.split(',')
         header = dataBits[0]
 
+        #  we process specific controller parameters and assume everything
+        #  else is sensor data.
+
         if header == "getState":
             # Convert the state to an int and emit the systemState signal
             state = int(dataBits[1])
             self.systemState.emit(state)
+
+        elif header.lower() == "getp2dparms":
+            # getP2DParms,<mode as int>,<slope as float>,<intercept as float>,
+            #       <turn on depth as int>,<turn off depth as int>,<P2D Lat as float>\n
+            
+            #  Due to a typo in the controller firmware, some controllers return 'getP2Dparms'
+            #  and others 'getP2DParms'. The latter is what is expected so we match on the lower()
+            #  text and patch this issue here.
+            header = 'getP2DParms'
+        
+            #  create the default dict
+            params = {'mode':-999,
+                      'slope':-999,
+                      'intercept':-999,
+                      'turn_on_depth':-999,
+                      'turn_off_depth':-999,
+                      'p2d_latitude':-999
+                     }
+
+            #  try to populate with data
+            try:
+                params['mode'] = int(dataBits[1])
+                params['slope'] = float(dataBits[2])
+                params['intercept'] = float(dataBits[3])
+                params['turn_on_depth'] = float(dataBits[4])
+                params['turn_off_depth'] = float(dataBits[5])
+                params['p2d_latitude'] = float(dataBits[6])
+            except:
+                pass
+
+            #  emit the result
+            self.parameterData.emit(sensorID, header, rxTime, params)
+
+        elif header == "getStartupVoltage":
+            # getStartupVoltage,<startup voltage threshold as float>\n
+
+            #  create the default dict
+            params = {'enabled':-999,
+                      'startup_threshold':-999
+                     }
+
+            #  try to populate with data
+            try:
+                params['enabled'] = int(dataBits[1])
+                params['startup_threshold'] = float(dataBits[2])
+            except:
+                pass
+
+            #  emit the result
+            self.parameterData.emit(sensorID, header, rxTime, params)
+
+        elif header == "getShutdownVoltage":
+            # getShutdownVoltage,<enabled as int>,<shutdown threshold as float>\n
+
+            #  create the default dict
+            params = {'enabled':-999,
+                      'shutdown_threshold':-999
+                     }
+
+            #  try to populate with data
+            try:
+                params['enabled'] = int(dataBits[1])
+                params['shutdown_threshold'] = float(dataBits[2])
+            except:
+                pass
+
+            #  emit the result
+            self.parameterData.emit(sensorID, header, rxTime, params)
+
+        elif header == "getRTC":
+            # getRTC,<year as int>,<month as int>,<day as int>,<hour as int>,
+            #       <minute as int>,<second as int>\n
+
+            #  create the default dict
+            params = {'year':-999,
+                      'month':-999,
+                      'day':-999,
+                      'hour':-999,
+                      'minute':-999,
+                      'second':-999
+                     }
+
+            #  try to populate with data
+            try:
+                params['year'] = int(dataBits[1])
+                params['month'] = int(dataBits[2])
+                params['day'] = int(dataBits[3])
+                params['hour'] = int(dataBits[4])
+                params['minute'] = int(dataBits[5])
+                params['second'] = int(dataBits[6])
+            except:
+                pass
+
+            #  emit the result
+            self.parameterData.emit(sensorID, header, rxTime, params)
+
+        elif header == "getStartDelay":
+            # getStartDelay,<Startup Delay in Secs as int>\n
+
+            #  create the default dict
+            params = {'delay_seconds':-999}
+
+            #  try to populate with data
+            try:
+                params['delay_seconds'] = int(dataBits[1])
+            except:
+                pass
+
+            #  emit the result
+            self.parameterData.emit(sensorID, header, rxTime, params)
+
+        elif header == "getIMUCal":
+            #getIMUCal,<accel_offset_x as int>,<accel_offset_y as int>,<accel_offset_z as int>,
+            #          <gyro_offset_x as int>,<gyro_offset_y as int>,<gyro_offset_z as int>,
+            #          <mag_offset_x as int>,<mag_offset_y as int>,<mag_offset_z as int>,
+            #          <accel_radius as int>,<mag_radius as int>\n
+
+            #  create the default dict
+            params = {'accel_offset_x':-999,
+                      'accel_offset_y':-999,
+                      'accel_offset_z':-999,
+                      'gyro_offset_x':-999,
+                      'gyro_offset_y':-999,
+                      'gyro_offset_z':-999,
+                      'mag_offset_x':-999,
+                      'mag__offset_y':-999,
+                      'mag__offset_z':-999,
+                      'accel_radius':-999,
+                      'mag_radius':-999
+                     }
+
+            #  try to populate with data
+            try:
+                params['accel_offset_x'] = float(dataBits[1])
+                params['accel_offset_y'] = float(dataBits[2])
+                params['accel_offset_z'] = float(dataBits[3])
+                params['gyro_offset_x'] = float(dataBits[4])
+                params['gyro_offset_y'] = float(dataBits[5])
+                params['gyro_offset_z'] = float(dataBits[6])
+                params['mag_offset_x'] = float(dataBits[7])
+                params['mag_offset_y'] = float(dataBits[8])
+                params['mag_offset_z'] = float(dataBits[9])
+                params['accel_radius'] = float(dataBits[10])
+                params['mag_radius'] = float(dataBits[11])
+            except:
+                pass
+
+            #  emit the result
+            self.parameterData.emit(sensorID, header, rxTime, params)
+        elif header == "getStrobeMode":
+            # getStrobeMode,<mode as int>, <flash on start as int>\n
+                        #  create the default dict
+            params = {'mode':-999,
+                      'flash_on_start':-999
+                     }
+
+            #  try to populate with data
+            try:
+                params['mode'] = int(dataBits[1])
+                params['flash_on_start'] = int(dataBits[2])
+            except:
+                pass
+
+            #  emit the result
+            self.parameterData.emit(sensorID, header, rxTime, params)
+
         else:
             #  re-emit everything else
             self.sensorData.emit(sensorID, header, rxTime, data)
@@ -367,5 +567,5 @@ class CamtrawlController(QtCore.QObject):
         self.isRunning = False
         self.controllerStopped.emit()
 
-        self.logger.debug("CamtrawlController stopped.")
+        self.logger.debug("CamtrawlController thread finished.")
 

@@ -31,13 +31,22 @@ class CamtrawlServer(QtCore.QObject):
     error = QtCore.pyqtSignal(str)
 
 
-    def __init__(self, local_address='127.0.0.1', local_port=7889, parent=None):
+    def __init__(self, local_address='127.0.0.1', local_port=7889,
+            cameras={}, parent=None):
 
         super(CamtrawlServer, self).__init__(parent)
 
         #  set some initial properties
         self.localAddress = QtNetwork.QHostAddress(local_address)
         self.localPort = int(local_port)
+
+        #  create a dict keyed by camera name with values that are dicts
+        #  that contain the 'label' key. This is not required as the
+        #  server will add cameras to this dict when it receives an image
+        #  from them, but pre-populating this dict allows the server to
+        #  return data from a GETCAMERAINFO request before any images
+        #  are acquired.
+        self.cameras = cameras
 
         self.logger = logging.getLogger(__name__)
 
@@ -57,8 +66,7 @@ class CamtrawlServer(QtCore.QObject):
 
         self.logger.info("Server started at " + self.localAddress.toString() + ":" + str(self.localPort))
 
-        # reset the cameras and clients dicts
-        self.cameras = {}
+        # reset the clients and sensor data dicts
         self.clients = {}
         self.sensorDataDict = {}
 
@@ -259,7 +267,7 @@ class CamtrawlServer(QtCore.QObject):
 
         for cam in imgRequest.cameras:
             #  check to make sure the camera exists
-            if cam in self.cameras:
+            if cam in self.cameras and 'image_data' in self.cameras[cam]:
 
                 #  get this camera's image data
                 image_data = self.cameras[cam]['image_data']
