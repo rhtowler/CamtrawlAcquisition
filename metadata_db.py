@@ -155,7 +155,7 @@ class metadata_db(QtCore.QObject):
     def datetime_to_db_str(self, dt_obj):
 
         dt_string = dt_obj.strftime("%Y-%m-%d %H:%M:%S")
-        dt_string = dt_string + '.' + str(round(dt_obj.microsecond / 1000))
+        dt_string = dt_string + '.%03d' % (round(dt_obj.microsecond / 1000))
 
         return dt_string
 

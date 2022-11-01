@@ -247,8 +247,8 @@ class CamtrawlAcquisition(AcquisitionBase):
                 if self.configuration['server']['start_server']:
                     self.StartServer()
 
-                #  now connect the controller's sensorData signal to the server
-                self.controller.sensorData.connect(self.server.sensorDataAvailable)
+                    #  now connect the controller's sensorData signal to the server
+                    self.controller.sensorData.connect(self.server.sensorDataAvailable)
 
             else:
                 #  something went wrong during startup. The error has already been logged
@@ -499,6 +499,36 @@ class CamtrawlAcquisition(AcquisitionBase):
         self.readyToTrigger = {}
         self.HWTriggerHDR = {}
         self.controller_port = {}
+
+
+    @QtCore.pyqtSlot(str, str, str)
+    def SetParameterRequest(self, module, parameter, value):
+        '''SetParameterRequest is overridden from AcquisitionBase and handles Camtrawl
+        controller specific parameter requests. "acquisition" requests will be
+        passed onto the parent method.
+        '''
+
+        #  split the parameter path
+        params = parameter.split('/')
+        if params[0] == '':
+            #  no parameter provided
+            return
+
+        if module.lower() == 'controller':
+
+            if params[0].lower() == 'set_thrusters':
+                #  the set_thrusters value argument should be a string of two
+                #  integers in the form thrusterOneVal, thrusterTwoVal. For example:
+                #  value = "1500,1500"
+                try:
+                    vals = value.split(',')
+                    self.controller.setThrusters(int(vals[0]), int(vals[1]))
+                except:
+                    #  for now we silently fail if there is an error parsing the value
+                    pass
+        else:
+            #  this message is not specific to Camtrawl so call the parent method
+            super().SetParameterRequest(module, parameter, value)
 
 
     @QtCore.pyqtSlot()

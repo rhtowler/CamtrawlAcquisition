@@ -195,36 +195,66 @@ controller:
 
 
 #  The sensors section contains configuration details for the handling of sensor data.
+#  The acquisition application can log NMEA-0183 like serial data from local devices,
+#  network ports, or RFC2217 compatible serial servers. The data must be comma
+#  delimited ASCII text terminated by \n or \n\r and the first field should uniquely identify
+#  the data.
+#
+#  Data can be logged in sync with the images, where the most recent data will be
+#  written at the same time the cameras are triggered, and it can also be logged
+#  at the time it is received or asynchronously. Synced data is written to the 
+#  metadata database sensor_data table and async data is written to the
+#  async_data table. Data in the sensor_data table is logged with the image number
+#  it is synced with and data in the async_data table includes the time the data was
+#  received.
 sensors:
 
-    #  if a sensor header is unknown, it will be logged as the default type.
+    #  if a sensor header is unknown, it will be logged as the default type. Specify
+    #  if the default is to log data synchronously or asynchronously.
     default_type: synchronous
 
     #  synchronous sensor data is cached when received and written to disk when
     #  the cameras are triggered and it is associated with an image number. List the
     #  headers here for sensor datagrams that should be logged as synchronous.
-    #
-    #  The $OHPR datagram contains the depth and orientation data sent from the
-    #  CamtrawlController.
-    synchronous: [$OHPR]
+
 
     #  asynchronous sensor data is written to disk when received. List the
     #  headers here for sensor datagrams that should be logged as asynchronous.
-    #
-    #  The $IMUC message contains the IMU calibration status from 0 (uncalibrated)
-    #  to 3 (fully calibrated).
-    #
-    #  The $CTSV contains the system voltage data.
-    #
-    #  The $CTCS message contains the <insert this info here>
-    #
-    #  The $SBCS contains the SBC CPU temperatures
-    asynchronous: [$CTCS,  $SBCS,  $IMUC,  $CTSV]
 
-    #  synchronous_timeout specifies how long synced sensor data will be cached (in seconds.)
+
+    #  synchronous_timeout specifies how long synced sensor data will be cached
+    #  (in seconds.) Data older than this will be purged and data for that sensor 
+    #  will not be logged until fresh data is received.
     synchronous_timeout: 5
 
-
+    #  specify any additional sensors that should be logged during acquisition. 
+    installed_sensors:    
+        #  Specify the name of the sensor - the sensor names must be unique
+        altimeter:        
+            # Specify asynchronous or synchronous logging for this sensors datagrams.
+            # Datagrams whose headers aren't explicitly configured as synced_headers
+            # or async_headers will be logged this way
+            type: asynchronous
+            # If needed, you can configure sync and async logging for individual datagram
+            # types by defining the headers in the synced_headers and/or async_headers
+            # list. If these fields are omitted, the datagrams will be logged according to
+            # the type
+        #synced_headers: [$GPGGA]
+        #async_headers: [$GPZDA]
+            #  Specify the serial port. This is passed directly to pySerial and can be a local 
+            #  serial port like "COM3" or "/dev/ttyUSB0" or "rfc2217://192.168.10.1:12345" or
+            #   "socket://192.168.0.10:98765" See the pySerial documentation for more info.
+            serial_port: COM4
+            #  Specify the baud rate of this sensors serial port. I believe this would be ignored
+            #  for network based ports.
+            serial_baud: 9600
+            
+        clumpweight:        
+            type: asynchronous
+            serial_port: COM4
+            serial_baud: 9600
+    
+    
 # Define the individual camera parameters
 cameras:
 

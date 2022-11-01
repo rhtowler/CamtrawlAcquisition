@@ -53,6 +53,7 @@ import numpy as np
 import cv2
 import SpinCamera
 import PySpin
+from SerialMonitor import SerialMonitor
 from CamtrawlServer import CamtrawlServer
 
 
@@ -99,6 +100,7 @@ class AcquisitionBase(QtCore.QObject):
                               'ffmpeg_debug_out': False}
 
     #  define PyQt Signals
+    sensorData = QtCore.pyqtSignal(str, str, datetime.datetime, str)
     stopAcquiring = QtCore.pyqtSignal(list)
     startAcquiring = QtCore.pyqtSignal((list, str, bool, dict, bool, dict))
     trigger = QtCore.pyqtSignal(list, int, datetime.datetime, bool, bool)
@@ -109,7 +111,7 @@ class AcquisitionBase(QtCore.QObject):
     parameterChanged = QtCore.pyqtSignal(str, str, str, bool, str)
 
     #  specify the application version
-    VERSION = '4.0'
+    VERSION = '4.1'
 
     #  specify the maximum number of times the application will attempt to open a
     #  metadata db file when running in combined mode and the original db file
@@ -150,7 +152,7 @@ class AcquisitionBase(QtCore.QObject):
         self.hw_triggered_cameras = []
         self.received = {}
         self.use_db = True
-        self.sensorData = {}
+        self.syncdSensorData = {}
         self.readyToTrigger = {}
 
         #  create the default configuration dict. These values are used for application
@@ -183,6 +185,10 @@ class AcquisitionBase(QtCore.QObject):
         #  camtrawl metadata database
         self.db = metadata_db()
 
+        #  Create a SerialMonitor instance which will manage serial sensor data.
+        self.serialSensors = SerialMonitor(self)
+        self.serialSensors.connect.SerialDataReceived(self.sensorDataReceived)
+                
         #  create the trigger timer
         self.triggerTimer = QtCore.QTimer(self)
         self.triggerTimer.timeout.connect(self.TriggerCameras)
@@ -377,9 +383,74 @@ class AcquisitionBase(QtCore.QObject):
         #  start the server, if enabled
         if self.configuration['server']['start_server']:
             self.StartServer()
-
-        #  contine camera setup in another method so we can override that method
-        #  in a subclass and aloow for additional pre-camera setup.
+            
+        #  set up the sensors - the user can log data from additional serial (or network)
+        #  sensors along with image data. These sensors are defined in the sensors ->
+        #  installed_sensors section of the config file. The sensor data is assumed to be
+        #  NMEA like ASCII data terminated by LF or CR/LF. The sensors can be connected to
+        #  a local serial port, or a network based serial server or a simple network socket.
+        if 'installed_sensors' in self.configuration['sensors']:
+            self.logger.info("Adding sensors:")
+            for sensor_name in self.configuration['sensors']['installed_sensors']:
+                
+                #  determine if the type for this sensor is provided - if so, set the is_synchronous
+                #  key so we know if it is synced or not when we log it.
+                if 'type' in self.configuration['sensors']['installed_sensors'][sensor_name]:
+                    if (self.configuration['sensors']['installed_sensors'][sensor_name]['type'].lower() in 
+                            ['synced', 'sync', 'synchronous']):
+                        self.configuration['sensors']['installed_sensors'][sensor_name]['is_synchronous'] = True
+                    else:
+                        self.configuration['sensors']['installed_sensors'][sensor_name]['is_synchronous'] = False
+                else:
+                    #  type was not provided so we use the default
+                    self.configuration['sensors']['installed_sensors'][sensor_name]['is_synchronous'] = \
+                            self.default_is_synchronous
+                
+                #  now add any per header synced/async configs - this overrides the type 
+                if 'synced_headers' in self.configuration['sensors']['installed_sensors'][sensor_name]:
+                    for header in self.configuration['sensors']['installed_sensors'][sensor_name]['synced_headers']:
+                        self.configuration['sensors']['synchronous'].append(header)
+                if 'async_headers' in self.configuration['sensors']['installed_sensors'][sensor_name]:
+                    for header in self.configuration['sensors']['installed_sensors'][sensor_name]['async_headers']:
+                        self.configuration['sensors']['asynchronous'].append(header)
+                
+                if 'serial_port' in self.configuration['sensors']['installed_sensors'][sensor_name]:
+                    port = self.configuration['sensors']['installed_sensors'][sensor_name]['serial_port']
+                else:
+                    self.logger.warning("    No port defined for sensor: " + sensor_name +
+                            ". this sensor will be ignored.")
+                    continue
+                    
+                if 'serial_baud' in self.configuration['sensors']['installed_sensors'][sensor_name]:
+                    try:
+                        baud = int(self.configuration['sensors']['installed_sensors'][sensor_name]['serial_baud'])
+                    except:
+                        #  if baud is not a number, default to 4800
+                        baud = 4800 
+                else:
+                    #  if baud isn't provided, default to 4800
+                    baud = 4800
+                
+                try:
+                    #  add this sensor to sensor monitor
+                    self.serialSensors.addDevice(sensor_name, port, baud)
+                    #  and try to open the port
+                    self.serialSensors.startMonitoring(devices=sensor_name)
+                    
+                    self.logger.info("   added sensor: " + sensor_name +
+                            " // port:" + port + " // baud:" + str(baud))
+                    
+                except Exception as e:
+                    #  ran into an issue with the serial port
+                    self.logger.error("   Error opening serial port for sensor: " + sensor_name +
+                            " // port:" + port + " // baud:" + str(baud))
+                    self.logger.error("   " + str(e))
+        else:
+            self.configuration['sensors']['installed_sensors'] = {}
+            
+            
+        #  continue camera setup in another method so we can override that method
+        #  in a subclass and allow for additional pre-camera setup.
         self.AcquisitionSetup2()
 
 
@@ -770,14 +841,14 @@ class AcquisitionBase(QtCore.QObject):
         #       image numbers. For example, 143.1, 143.2, 143.3, 143.4
 
         #  and write synced sensor data  to the db
-        for sensor_id in self.sensorData:
-            for header in self.sensorData[sensor_id]:
+        for sensor_id in self.syncdSensorData:
+            for header in self.syncdSensorData[sensor_id]:
                 #  check if the data is fresh
-                freshness = self.trig_time - self.sensorData[sensor_id][header]['time']
+                freshness = self.trig_time - self.syncdSensorData[sensor_id][header]['time']
                 if abs(freshness.total_seconds()) <= self.configuration['sensors']['synchronous_timeout']:
                     #  it is fresh enough. Write it to the db
-                    self.db.insert_sync_data(self.n_images, self.sensorData[sensor_id][header]['time'],
-                            sensor_id, header, self.sensorData[sensor_id][header]['data'])
+                    self.db.insert_sync_data(self.n_images, self.syncdSensorData[sensor_id][header]['time'],
+                            sensor_id, header, self.syncdSensorData[sensor_id][header]['data'])
 
 
     @QtCore.pyqtSlot(str, str, dict)
@@ -979,6 +1050,12 @@ class AcquisitionBase(QtCore.QObject):
 
         self.logger.info("Acquisition is Stopping...")
 
+
+        #  if we have serial sensors, stop monitoring them
+        if len(self.serialSensors.devices) > 0:
+            self.logger.debug("Closing serial sensor connections...")
+            self.serialSensors.stopMonitoring()
+
         #  if we're using the database, close it
         if self.use_db and self.db.is_open:
             self.logger.debug("Closing the database...")
@@ -986,7 +1063,7 @@ class AcquisitionBase(QtCore.QObject):
 
         #  same with the server
         if self.configuration['server']['start_server']:
-            self.logger.debug("Closing the server...")
+            self.logger.debug("Shutting down the server...")
             self.stopServer.emit()
 
         #  we need to make sure we release all references to our SpinCamera
@@ -1013,7 +1090,7 @@ class AcquisitionBase(QtCore.QObject):
 
         # Now we can release the Spinnaker system instance
         if (self.system):
-            self.logger.debug("Releasing Spinnaker system...")
+            self.logger.debug("Releasing Spinnaker system instance...")
             self.system.ReleaseInstance()
             self.system = None
 
@@ -1111,10 +1188,9 @@ class AcquisitionBase(QtCore.QObject):
                 self.configuration['server']['server_port'],
                 cameras=server_cam_dict)
 
-        #  connect the server's signals. Connect both the sync and async signals
-        #  to the same method since we use our configuration file to figure out
-        #  how to log sensor data.
+        #  connect the server's signals and slots
         self.server.sensorData.connect(self.SensorDataAvailable)
+        self.sensorData.connect(self.server.SensorDataAvailable)
         self.server.getParameterRequest.connect(self.GetParameterRequest)
         self.server.setParameterRequest.connect(self.SetParameterRequest)
         self.server.error.connect(self.LogServerError)
@@ -1229,8 +1305,31 @@ class AcquisitionBase(QtCore.QObject):
                 self.n_images = max_num + 1
 
 
+    @QtCore.pyqtSlot(str, str, object)
+    def sensorDataReceived(self, deviceName, data, err):
+        '''sensorDataReceived is called when we receive data from a sensor. This method will
+        get the time, parse the header. and then call SensorDataAvailable to log it and
+        emit it for other consumers.
+        '''
+        
+        #  check if we have data
+        if data is not None:
+            #  get the time, parse the header
+            rx_time = datetime.datetime.now()
+            data_bits = data.split(',')
+            header = data_bits[0]
+    
+            #  and call SensorDataAvailable
+            self.SensorDataAvailable(deviceName, header, rx_time, data)
+
+
     @QtCore.pyqtSlot(str, str)
     def GetParameterRequest(self, module, parameter):
+        '''The GetParameterRequest slot is called when a GetParameter command is sent ro the
+        CamtrawlServer. Here we intercept and act on parameters that are common to AcquisitionBase.
+        Parameters specific to child classes should be handled in the child class before calling
+        this method.
+        '''
 
         cam_names = list(self.received.keys())
 
@@ -1271,7 +1370,19 @@ class AcquisitionBase(QtCore.QObject):
 
     @QtCore.pyqtSlot(str, str, str)
     def SetParameterRequest(self, module, parameter, value):
+        '''The SetParameterRequest slot is called when a SetParameter command is sent to the
+        CamtrawlServer. Here we intercept and act on parameters that are common to AcquisitionBase.
+        Parameters specific to child classes should be handled in the child class before calling
+        this method.
+        
+        The parameter argument is a string that defines the specific attribute that the provided
+        value applies to. If additional specificity is required, the parameter string is delineated
+        with "/". For example, when setting camera specific parameters, the parameter argument
+        would be: "<camera name>/gain" or "<camera name>/exposure"
+        
+        '''
 
+        #  get a list of our current cameras
         cam_names = list(self.received.keys())
 
         #  split the parameter path
@@ -1281,6 +1392,7 @@ class AcquisitionBase(QtCore.QObject):
             return
 
         if module.lower() == 'acquisition':
+            #  this is a parameter related to acquisition
 
             if params[0].lower() == 'start_triggering':
                 if not self.isTriggering:
@@ -1293,13 +1405,15 @@ class AcquisitionBase(QtCore.QObject):
                     self.isTriggering = False
                 self.parameterChanged.emit(module, 'is_triggering', str(int(self.isTriggering)), 1, '')
 
+            #  check if this is a camera specific parameter
             elif params[0] in cam_names:
-
-                #  make sure we have a parameter for this camera
+                #  it is. Nect make sure we have a parameter for this camera
                 if len(params) < 2:
+                    #  no param provided, don't know what to do so just return
                     return
 
                 if params[1].lower() == 'gain':
+                    #  this is a set gain command for the specified camera
                     try:
                         ok = self.cameras[params[0]].set_gain(float(value))
                         if ok:
@@ -1309,6 +1423,7 @@ class AcquisitionBase(QtCore.QObject):
                         pass
 
                 elif params[1].lower() == 'exposure':
+                    #  this is a set exposure command for the specified camera
                     try:
                         ok = self.cameras[params[0]].set_exposure(float(value))
                         if ok:
@@ -1316,7 +1431,17 @@ class AcquisitionBase(QtCore.QObject):
                             self.parameterChanged.emit(module, parameter, str(param_value), 1, '')
                     except:
                         pass
-
+        
+        #  Users can send data to attached sensors to configure or control them.
+        #      module = "sensors"
+        #      parameter = sensor name (as specified in configuration file)
+        #      value = string containing the datagram to send to the sensor
+        elif module.lower() == 'sensors':
+            #  this is a param being sent to a sensor - check if the sensor exists
+            if params[0] in self.serialSensors.devices:
+                #  it does, send the datagram to the device
+                self.serialSensors.txData(params[0], value)
+            
 
     @QtCore.pyqtSlot(str, str, datetime.datetime, str)
     def SensorDataAvailable(self, sensor_id, header, rx_time, data):
@@ -1357,17 +1482,21 @@ class AcquisitionBase(QtCore.QObject):
             #  the cameras are triggered
 
             #  first check if we have an entry for this sensor
-            if sensor_id not in self.sensorData:
+            if sensor_id not in self.syncdSensorData:
                 #  nope, add it
-                self.sensorData[sensor_id] = {}
+                self.syncdSensorData[sensor_id] = {}
 
             #  add the data
-            self.sensorData[sensor_id][header] = {'time':rx_time, 'data':data}
+            self.syncdSensorData[sensor_id][header] = {'time':rx_time, 'data':data}
 
         else:
             #  this is async sensor data so we just write it
             if self.use_db:
                 self.db.insert_async_data(sensor_id, header, rx_time, data)
+
+
+        #  lastly emit the sensorData signal to send it to the server 
+        self.sensorData.emit(sensor_id, header, rx_time, data)
 
 
     def ReadConfig(self, config_file, config_dict):

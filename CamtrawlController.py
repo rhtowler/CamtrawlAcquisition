@@ -317,7 +317,6 @@ class CamtrawlController(QtCore.QObject):
 
         Returns:
             None
-
         '''
 
         chanOneTrig = bool(chanOneTrig)
@@ -339,6 +338,45 @@ class CamtrawlController(QtCore.QObject):
         msg = ("trigger," + str(strobePreFire) + "," + str(strobe1Exp) +
                 "," + str(strobe2Exp) + "," + str(chanOneTrig) +
                 "," + str(chanTwoTrig) + "\n")
+
+        self.txSerialData.emit(self.deviceParams['deviceName'], msg)
+
+        self.logger.debug("CamtrawlController sent: " + msg)
+
+
+    def setThrusters(self, thrusterOneVal, thrusterTwoVal):
+        '''setThrusters sends the setThrusters command to the controller. Some variants
+        of the CamtrawlController are compiled with support for two thrusters and this
+        command will set the commanded direction and speed of these thrusters. This
+        command will be ignored if the controller is not compiled with thruster support
+        
+        The current implementation drives two BlueRobotics ESCs and values come directly
+        from the Arduino Servo library and range from 1100-1900 with ~1500 being neutral
+        or off. Values outside of this range will be clamped. Note that changes are not
+        immediate as the controller throttles the change in speed to minimize load on
+        the power system. The allowed rate of change is set in the controller firmware.
+        Also note that for safety, the controller will stop the thrusters if another
+        setThruster command is not received within a specified window. The current 
+        timeout value is 2 seconds. This ensures that the thrusters will turn off if
+        there is a software or comms issue and the system becomes unresponsive.
+        
+        Args:
+            thrusterOneVal (int):
+                The value that the ESC for thruster one will be set to. Valid values are
+                between 1100-1900 with 1500 being off/neutral.
+            thrusterTwoVal (int):
+                The value that the ESC for thruster two will be set to. Valid values are
+                between 1100-1900 with 1500 being off/neutral.
+
+        Returns:
+            None
+        '''
+
+        #  make sure we have ints
+        thrusterOneVal = int(round(thrusterOneVal))
+        thrusterTwoVal = int(round(thrusterTwoVal))
+
+        msg = ("setThrusters," + str(thrusterOneVal) + "," + str(thrusterTwoVal) + "\n")
 
         self.txSerialData.emit(self.deviceParams['deviceName'], msg)
 
