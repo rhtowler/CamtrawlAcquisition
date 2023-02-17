@@ -108,7 +108,7 @@ class SpinCamera(QtCore.QObject):
         self.device_info = None
         self.rotation = 'none'
         self.timeout = 2000
-        self.raw_conversion = PySpin.HQ_LINEAR
+        self.raw_conversion = PySpin.SPINNAKER_COLOR_PROCESSING_ALGORITHM_HQ_LINEAR
         self.hdr_enabled = False
         self.hdr_save_merged = False
         self.hdr_signal_merged = False
@@ -936,7 +936,8 @@ class SpinCamera(QtCore.QObject):
         chunk_data = raw_image.GetChunkData()
 
         #  convert from raw to our preferred Numpy format
-        converted_image = raw_image.Convert(self.ND_pixelFormat, self.raw_conversion)
+        converted_image = self.processor.Convert(raw_image, self.ND_pixelFormat)
+        #converted_image = raw_image.Convert(self.ND_pixelFormat, self.raw_conversion)
 
         #  populate the return dict
         image_data['data'] = converted_image.GetNDArray().copy()
@@ -996,6 +997,10 @@ class SpinCamera(QtCore.QObject):
             self.acquisitionStarted.emit(self, self.camera_name, False)
             return
 
+        #  create an instance of the PySpin ImageProcessor
+        self.processor = PySpin.ImageProcessor()
+        self.processor.SetColorProcessing(self.raw_conversion)
+        
         #  create a instance of image_writer
         self.image_writer = ImageWriter.ImageWriter(self.camera_name)
 

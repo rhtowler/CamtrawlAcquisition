@@ -186,8 +186,8 @@ class AcquisitionBase(QtCore.QObject):
         self.db = metadata_db()
 
         #  Create a SerialMonitor instance which will manage serial sensor data.
-        self.serialSensors = SerialMonitor(self)
-        self.serialSensors.connect.SerialDataReceived(self.sensorDataReceived)
+        self.serialSensors = SerialMonitor.SerialMonitor(self)
+        self.serialSensors.SerialDataReceived.connect(self.sensorDataReceived)
                 
         #  create the trigger timer
         self.triggerTimer = QtCore.QTimer(self)
@@ -1190,7 +1190,7 @@ class AcquisitionBase(QtCore.QObject):
 
         #  connect the server's signals and slots
         self.server.sensorData.connect(self.SensorDataAvailable)
-        self.sensorData.connect(self.server.SensorDataAvailable)
+        self.sensorData.connect(self.server.sensorDataAvailable)
         self.server.getParameterRequest.connect(self.GetParameterRequest)
         self.server.setParameterRequest.connect(self.SetParameterRequest)
         self.server.error.connect(self.LogServerError)

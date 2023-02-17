@@ -7,18 +7,18 @@
 application:
 
     output_mode: separate
-    output_path: C:/camtrawl/data
-    #output_path: /home/camtrawl/camtrawl_data
+    #output_path: C:/camtrawl/data
+    output_path: /home/camtrawl/camtrawl_data
     database_name: CamtrawlMetadata.db3
     log_level: INFO
     shut_down_on_exit:  False
-    ffmpeg_path: ./ffmpeg/bin
-    #ffmpeg_path:
+    #ffmpeg_path: ./ffmpeg/bin
+    ffmpeg_path:
 
 
 acquisition:
 
-    trigger_rate: 5
+    trigger_rate: 10
     trigger_limit: 50
 
 
