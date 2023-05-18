@@ -51,18 +51,27 @@ controller:
 sensors:
 
     default_type: synchronous
-    synchronous: [$OHPR]
-    asynchronous: [$CTCS,  $SBCS,  $IMUC,  $CTSV]
     synchronous_timeout: 5
 
     installed_sensors:    
-        altimeter:        
-            port: COM4
-            baud: 9600
+        # altimeter:
+            # type: asynchronous
+            # add_header: $ALTIM
+            # logging_interval_ms: 1000
+            # serial_port: /dev/ttyUSB1
+            # serial_baud: 9600
             
-        clumpweight: 
-            port: COM4
-            baud: 9600
+        # thrusters:
+            # type: asynchronous
+            # logging_interval_ms: 500
+            # serial_port: /dev/ttyUSB0
+            # serial_baud: 9600
+            
+        # clumpweight:
+            # type: asynchronous
+            # logging_interval_ms: 1000
+            # serial_port: socket://192.168.10.5:2345
+            # serial_baud: 115200
 
 cameras:
 

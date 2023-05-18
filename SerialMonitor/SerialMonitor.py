@@ -13,7 +13,7 @@ class SerialMonitor(QObject):
     complete line is defined as a line terminated by LF, CR+LF, or CR.) The line
     can optionally be parsed and the resulting output is passed from the
     monitoring thread to SerialMonitor via Qt's signal/Slot mechanism which
-    then re-emits these signals which are then handled by the application's
+    which re-emits these signals so they can be handled by the application's
     serial event handling method. SerialMonitor handles both sending and receiving
     of data and thus can be used for polled sensors and for general serial I/O.
 
@@ -57,12 +57,14 @@ class SerialMonitor(QObject):
     SerialControlState = pyqtSignal(str, str, bool)
     SerialControlChanged = pyqtSignal(str, dict)
     SerialDataReceived = pyqtSignal(str, str, object)
+    SerialDevicesStopped = pyqtSignal()
+    SerialError = pyqtSignal(str, object)
     txSerialData = pyqtSignal(str, str)
     getSerialCTL = pyqtSignal(str)
     setSerialRTS = pyqtSignal(str, bool)
     setSerialDTR = pyqtSignal(str, bool)
     stopDevice = pyqtSignal(list)
-
+    
 
     def __init__(self, parent=None):
         """Initialize this SerialMonitor instance."""
@@ -79,14 +81,7 @@ class SerialMonitor(QObject):
         self.threads = dict()
 
 
-    def __del__(self):
-        """Clean up any active QserialThread objects before deleting the SerialMonitor instance."""
-
-        #  call stopMonitoring
-        self.stopMonitoring()
-
-
-    def addDevice(self, deviceName, port, baud, parseType, parseExp, parseIndex, cmdPrompt='', \
+    def addDevice(self, deviceName, port, baud, parseType, parseExp, parseIndex, cmdPrompt='',
                   byteSize=8, parity='N', stopBits=1, flowControl='NONE', pollRate=500,
                   txRate=500, initialState = (True, True)):
         """Add a serial device to the list of devices that SerialMonitor watches.
@@ -196,6 +191,7 @@ class SerialMonitor(QObject):
                                     'pollRate':pollRate,
                                     'txRate':txRate,
                                     'initialState':initialState,
+                                    'remove': False,
                                     'thread':None}
 
 
@@ -212,7 +208,6 @@ class SerialMonitor(QObject):
           devices will be started.
         """
 
-
         if devices == None:
             #  no devices specified - get a list of all devices
             devices = self.devices.keys()
@@ -223,6 +218,11 @@ class SerialMonitor(QObject):
         #  iterate through the provided devices, starting each one
         for device in devices:
 
+            #  check if this device is already running
+            if self.devices[device]['thread']:
+                #  it is, skip it
+                continue
+
             #  create the serialDevice object
             serialDevice = SerialDevice.SerialDevice(self.devices[device])
 
@@ -231,13 +231,13 @@ class SerialMonitor(QObject):
             serialDevice.SerialControlChanged.connect(self.controlDataChanged)
             serialDevice.DCEControlState.connect(self.controlDataState)
             serialDevice.SerialError.connect(self.serialError)
-            self.stopDevice.connect(serialDevice.stopPolling)
-
+            
             #  connect our signals to the SerialMonitorThread
             self.txSerialData.connect(serialDevice.write)
             self.getSerialCTL.connect(serialDevice.getControlLines)
             self.setSerialRTS.connect(serialDevice.setRTS)
             self.setSerialDTR.connect(serialDevice.setDTR)
+            self.stopDevice.connect(serialDevice.stopPolling)
 
             #  create a thread to run the monitor in
             thread = QThread(self)
@@ -248,8 +248,8 @@ class SerialMonitor(QObject):
             #  connect thread specific signals and slots - this facilitates starting,
             #  stopping, and deletion of the threads.
             thread.started.connect(serialDevice.startPolling)
-            serialDevice.SerialPortClosed.connect(thread.quit)
-            thread.finished.connect(self.removeDevice)
+            serialDevice.SerialPortClosed.connect(self.deviceStopped)
+            thread.finished.connect(self.threadCleanup)
             thread.finished.connect(thread.deleteLater)
 
             #  store references to our new objects
@@ -262,9 +262,10 @@ class SerialMonitor(QObject):
 
     def stopMonitoring(self, devices=None):
         """
-          Stop monitoring emits the ``stopDevice`` signal which informs the
+          StopMonitoring emits the ``stopDevice`` signal which informs the
           SerialDevice thread to stop polling, flush and close the serial port, and
-          terminate the thread.
+          terminate the thread. The device name and settings will be maintained and
+          you can call startMonitoring
 
           You can stop specific devices by setting the `devices` keyword to a list
           of device(s) you want to stop. If you do not specify any devices, all
@@ -278,16 +279,45 @@ class SerialMonitor(QObject):
             #  device was specified as a string, put it in a list
             devices = [devices]
 
+        #  emit the stopDevice signal to inform device threads to shut down
         self.stopDevice.emit(devices)
 
 
+    def removeDevice(self, devices=None):
+        """removeDevice stops a running device (if needed) and then removes it
+        from SerialMonitor. You can specify the device to remove, but if you
+        omit the argument, all devices are removed.
+        
+        """
+        
+        if devices == None:
+            #  no devices specified - get a list of all devices
+            devices = list(self.devices.keys())
+        elif (type(devices) is str):
+            #  device was specified as a string, put it in a list
+            devices = [devices]
+        
+        #  first get a list of running devices
+        runningDevices = self.whosMonitoring()
+        
+        #  check our list of devices to remove against the list of running devices.
+        for device in devices:
+            if device in runningDevices:
+                #  this device is running - set it for removal and then tell it to stop
+                self.devices[device]['remove'] = True
+                self.stopDevice.emit([device])
+            else:
+                #  this device is already stopped - just remove it
+                del self.devices[device]
+                
+
     def whosMonitoring(self):
-        """Returns a list of currently running serial acquisition threads"""
+        """Returns a list of currently running serial devices"""
         runningDevices = []
-        for device in self.devices.iter():
+        for device in self.devices:
             #  assume if thread is populated, then the thread is running
-            if device['thread']:
-                runningDevices.append(device[0])
+            if self.devices[device]['thread']:
+                runningDevices.append(device)
 
         return runningDevices
 
@@ -311,7 +341,7 @@ class SerialMonitor(QObject):
     def txData(self, deviceName, data):
         """Transmit data to the specified device
 
-        `deviceName` must be set to the name of a configured
+        `deviceName` must be set to the name of a configured device
         """
 
         #  send the txSerialData signal to the monitoring threads
@@ -351,14 +381,34 @@ class SerialMonitor(QObject):
 
     @pyqtSlot(str, object)
     def serialError(self, deviceName, errorObj):
-        # consolidates the error signals from the individual monitoring threads and raises
-        #  them in the main application thread.
-        raise errorObj
+        # consolidates the error signals from the individual monitoring threads and re-emit
+        self.SerialError.emit(deviceName, errorObj)
+        
 
-
-    def removeDevice(self):
+    @pyqtSlot(str)
+    def deviceStopped(self, deviceName):
+        """deviceStopped is called when a device's serial port is closed. After the port
+        is closed, we stop the thread and optionally remove the device from SerialMonitor.
+        Final thread cleanup is handled in threadCleanup()
+        
+        This method should not be called directly.
         """
-          removeDevice is called when a SerialMonitorThread thread instance finishes
+        
+        if self.devices[deviceName]['thread']:
+            self.devices[deviceName]['thread'].quit()
+        
+        #  update the thread
+        self.devices[deviceName]['thread'] = None
+        
+        #  check if we're removing this device
+        if self.devices[deviceName]['remove']:
+            del self.devices[deviceName]
+
+
+    @pyqtSlot()
+    def threadCleanup(self):
+        """
+          threadCleanup is called when a SerialMonitorThread thread instance finishes
           running and emits the "finished" signal. This method cleans up references
           to that thread and SerialMonitorThread object.
 
@@ -368,16 +418,14 @@ class SerialMonitor(QObject):
         #  get a reference to the thread that is shutting down
         thread = QObject.sender(self)
 
-        #  get the name of the device that is shutting down
-        deviceName = self.threads[thread].deviceName
+        if thread in self.threads:
 
-        #print('Stopping ' + deviceName, '   Thread:', thread)
-
-        #  update the thread
-        self.devices[deviceName]['thread'] = None
-
-        #  delete the reference to the thread
-        del self.threads[thread]
+            #  delete the reference to the thread
+            del self.threads[thread]
+            
+            #  emit the SerialDevicesStopped signal if all threads have stopped
+            if len(self.threads) == 0:
+                self.SerialDevicesStopped.emit()
 
 
 

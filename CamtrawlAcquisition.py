@@ -68,21 +68,16 @@ class CamtrawlAcquisition(AcquisitionBase):
         self.controllerCurrentState = 0
         self.readyToTrigger = {}
 
-        # Add default config values for the controller and sensor integration
-        # that CamtrawlAcquisition adds to AcquisitionBase.
-
+        #  Add default config values for the controller. We add the controller to the
+        #  sensors section in AcquisitionSetup2 to ensure that it is ignored during sensor
+        #  setup in AcquisitionSetup since we treat the controller differently than a
+        #  standard sensor.
         self.configuration['controller'] = {}
-        self.configuration['sensors'] = {}
-
+        
         self.configuration['controller']['use_controller'] = False
         self.configuration['controller']['serial_port'] = 'COM3'
         self.configuration['controller']['baud_rate'] = 921600
         self.configuration['controller']['strobe_pre_fire'] = 150
-
-        self.configuration['sensors']['default_type'] = 'synchronous'
-        self.configuration['sensors']['synchronous'] = ['$OHPR']
-        self.configuration['sensors']['asynchronous'] = ['$CTCS', '$SBCS', '$IMUC', '$CTSV']
-        self.configuration['sensors']['synchronous_timeout'] = 5
 
 
     def AcquisitionSetup2(self):
@@ -91,11 +86,6 @@ class CamtrawlAcquisition(AcquisitionBase):
         configuring the cameras and then starting acquisition. The application
         will exit here if there are any issues encountered during setup.
         '''
-
-        #  check if we're using the controller
-        if self.configuration['controller']['use_controller']:
-            #  we are, start it.
-            self.StartController()
 
         #  if the free space is ok, configure the cameras
         if self.disk_ok:
@@ -107,15 +97,40 @@ class CamtrawlAcquisition(AcquisitionBase):
         else:
             self.cam_ok = False
 
-        #  check if everything is ok
+        #  check if everything is ok with disk and cameras
         if self.cam_ok and self.disk_ok:
-            #  the cameras are ready to acquire. Set the isAcquiring property
-            self.isAcquiring = True
+            
+            #  start the server, if enabled
+            if self.configuration['server']['start_server']:
+                self.StartServer()
+            
+            #  camera and disk OK, check if we're using the controller
+            if self.configuration['controller']['use_controller']:
+                
+                #  we are, add the camtrawl controller to the sensors config. Adding this here
+                #  ensures that the controller is ignored when general sensors are configured
+                #  in AcquisitionBase.AcquisitionSetup.
+                self.configuration['sensors']['synchronous'].extend(['$OHPR'])
+                self.configuration['sensors']['asynchronous'].extend(['$CTCS', '$SBCS', '$IMUC', '$CTSV'])
+                self.configuration['sensors']['installed_sensors']['CTControl'] = {}
+                self.configuration['sensors']['installed_sensors']['CTControl']['logging_interval_ms'] = None
+                
+                #  start the controller.
+                self.StartController()
+                
+                #  acquisition may or may not be started in ControllerStateChanged based on the
+                #  state of the CamtrawlController. Acquisition will start if it is in deployed
+                #  or force-on mode, and it will not start if it is in download mode.
+            
+            else:
+                #  if we're not using the controller we just start acquiring since
+                #  we don't know the system state. Set the isAcquiring property
+                self.isAcquiring = True
 
-            #  start the trigger timer. Set a long initial interval
-            #  to allow the cameras time to finish getting ready.
-            self.isTriggering = True
-            self.triggerTimer.start(1000)
+                #  start the trigger timer. Set a long initial interval
+                #  to allow the cameras time to finish getting ready.
+                self.isTriggering = True
+                self.triggerTimer.start(1000)
 
         else:
             #  no, something didn't work out so check if we're supposed to shut down.
@@ -160,6 +175,7 @@ class CamtrawlAcquisition(AcquisitionBase):
         self.controller.parameterData.connect(self.ControllerParamData)
         self.controller.systemState.connect(self.ControllerStateChanged)
         self.controller.error.connect(self.ControllerError)
+        self.controller.controllerStopped.connect(self.ControllerStopped)
 
         #  and start the controller object - we set the controllerStarting
         #  attribute so we know if we receive an error signal from the
@@ -237,18 +253,10 @@ class CamtrawlAcquisition(AcquisitionBase):
             self.controller.getStartupVoltage()
             self.controller.getShutdownVoltage()
 
-            #  finish the setup by dealing with the camera and disk states
+            #  finish the setup by checking the camera and disk states
             if self.cam_ok and self.disk_ok:
                 #  the cameras are ready to acquire and we have some disk space.
-                #  Set the isAcquiring property
                 self.isAcquiring = True
-
-                #  start the server, if enabled
-                if self.configuration['server']['start_server']:
-                    self.StartServer()
-
-                    #  now connect the controller's sensorData signal to the server
-                    self.controller.sensorData.connect(self.server.sensorDataAvailable)
 
             else:
                 #  something went wrong during startup. The error has already been logged
@@ -490,7 +498,34 @@ class CamtrawlAcquisition(AcquisitionBase):
 
         #  stop the controller (if started)
         if self.controller:
+            self.logger.info("Stopping the CamtrawlController...")
             self.controller.stopController()
+            
+            #  we wait for the cotroller thread to exit then pick up teardown
+            #  in the ControllerStopped slot. This allows the controller thread to
+            #  exit cleanly before continuing.
+            
+        else:
+            #  we're not using the controller so we can jump right into the parent
+            #  class's teardown method.
+
+            # call the base class's AcqisitionTeardown method
+            super().AcqisitionTeardown()
+
+            #  clean up some CamtrawlAcquisition specific objects
+            self.readyToTrigger = {}
+            self.HWTriggerHDR = {}
+            self.controller_port = {}
+
+
+    @QtCore.pyqtSlot()
+    def ControllerStopped(self):
+        '''The ControllerStopped slot is called when the CamtrawlController's thread
+        finishes running. During teardown we stop the controller, wait for it to signal
+        it is stopped, then continue with teardown.
+        '''
+
+        self.logger.info("CamtrawlController stopped.")
 
         # call the base class's AcqisitionTeardown method
         super().AcqisitionTeardown()
@@ -516,16 +551,26 @@ class CamtrawlAcquisition(AcquisitionBase):
 
         if module.lower() == 'controller':
 
-            if params[0].lower() == 'set_thrusters':
-                #  the set_thrusters value argument should be a string of two
-                #  integers in the form thrusterOneVal, thrusterTwoVal. For example:
-                #  value = "1500,1500"
-                try:
-                    vals = value.split(',')
-                    self.controller.setThrusters(int(vals[0]), int(vals[1]))
-                except:
-                    #  for now we silently fail if there is an error parsing the value
-                    pass
+            
+            #  set_thrusters is deprecated - thruster control has moved to a separate
+            #  "sensor" and is now controlled by sending parameters to the "sensors"
+            #  module. This code is here to provide a simple template for adding
+            #  the handling of setting controller params via the server if this is
+            #  something that is needed in the future.
+            
+#            if params[0].lower() == 'set_thrusters':
+#                #  the set_thrusters value argument should be a string of two
+#                #  integers in the form thrusterOneVal, thrusterTwoVal. For example:
+#                #  value = "1500,1500"
+#                try:
+#                    vals = value.split(',')
+#                    self.controller.setThrusters(int(vals[0]), int(vals[1]))
+#                except:
+#                    #  for now we silently fail if there is an error parsing the value
+#                    pass
+
+            pass
+            
         else:
             #  this message is not specific to Camtrawl so call the parent method
             super().SetParameterRequest(module, parameter, value)

@@ -85,7 +85,7 @@ enum sensorType {
 message sensor {
     required string id = 1;
     required string header = 2;
-     required double timestamp = 3;
+    required double timestamp = 3;
     required string data = 4;
     optional sensorType type = 5;
 }

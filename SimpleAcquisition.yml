@@ -7,19 +7,19 @@
 application:
 
     output_mode: separate
-    #output_path: C:/camtrawl/data
-    output_path: /home/camtrawl/camtrawl_data
+    output_path: C:/camtrawl/data
+    #output_path: /home/camtrawl/camtrawl_data
     database_name: CamtrawlMetadata.db3
     log_level: INFO
     shut_down_on_exit:  False
-    #ffmpeg_path: ./ffmpeg/bin
-    ffmpeg_path:
+    ffmpeg_path: ./ffmpeg/bin
+    #ffmpeg_path:
 
 
 acquisition:
 
     trigger_rate: 10
-    trigger_limit: 50
+    trigger_limit: 100
 
 
 server:
@@ -32,9 +32,14 @@ server:
 sensors:
 
     default_type: synchronous
-    synchronous: [$GPGGA, $GPRMC, $GPGLL]
-    asynchronous: []
     synchronous_timeout: 5
+
+    installed_sensors:    
+        # GPS:
+            # serial_port: /dev/ttyUSB1
+            # serial_baud: 4800
+            # synced_headers: [$GPGGA,$GPRMC]
+            # async_headers: [$GPZDA]
 
 
 cameras:
@@ -43,9 +48,9 @@ cameras:
     default:
 
         gain: 25
-        exposure_us: 3000
+        exposure_us: 4000
         label: camera
-        # values: none, cw90, cw180, cw270, fliplr, flipud
+        # rotation values: none, cw90, cw180, cw270, fliplr, flipud
         rotation:  None
         sensor_binning: 1
 
@@ -54,12 +59,12 @@ cameras:
         jpeg_quality: 90
         image_scale: 100
 
-        save_video: False
+        save_video: True
         video_preset: x264-fast
         video_scale:  50
 
         hdr_enabled: False
-        hdr_save_merged:  False
+        hdr_save_merged:  True
         hdr_signal_merged:  False
         hdr_merge_method:  mertens
         hdr_save_format:  hdr

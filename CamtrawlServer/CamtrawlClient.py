@@ -100,7 +100,7 @@ import datetime
 import struct
 import numpy
 import cv2
-from . import CamtrawlServer_pb2
+import CamtrawlServer_pb2
 from PyQt5 import QtNetwork, QtCore
 
 
@@ -116,6 +116,7 @@ class CamtrawlClient(QtCore.QObject):
     sensorInfo = QtCore.pyqtSignal(dict)
     syncSensorData = QtCore.pyqtSignal(str, str, datetime.datetime, str)
     asyncSensorData = QtCore.pyqtSignal(str, str, datetime.datetime, str)
+    dataRequestComplete = QtCore.pyqtSignal()
     parameterData = QtCore.pyqtSignal(str, str, str, bool, str)
     connected = QtCore.pyqtSignal()
     disconnected = QtCore.pyqtSignal()
@@ -130,7 +131,7 @@ class CamtrawlClient(QtCore.QObject):
         self.socket.error.connect(self.socketError)
 
         #  create the receive buffer and other bookkeeping variables
-        self.datagramBuffer = bytearray()
+        self.datagramBuffer = QtCore.QByteArray()
         self.thisDatagramSize = 0
         self.cameras = {}
         self.isConnected = False
@@ -221,7 +222,6 @@ class CamtrawlClient(QtCore.QObject):
 
             #  and send the request
             self.sendRequest(request.SerializeToString())
-
 
 
     def getData(self, sensorID=None):
@@ -476,7 +476,7 @@ class CamtrawlClient(QtCore.QObject):
             self.socket.close()
 
             #  reset state
-            self.datagramBuffer = bytearray()
+            self.datagramBuffer = QtCore.QByteArray()
             self.thisDatagramSize = 0
             self.cameras = {}
             self.isConnected = False
@@ -496,31 +496,31 @@ class CamtrawlClient(QtCore.QObject):
         #  while data is available
         while (self.socket.bytesAvailable() > 0):
             #  append this data to the receive buffer
-            self.datagramBuffer.extend(self.socket.readAll())
-
+            self.datagramBuffer.append(self.socket.readAll())
+            
             #  assemble and process datagrams - datagrams are in the form
             #    [size - (uint32) 4 bytes][data - protobuff size bytes]
 
-            #  check if we need to unpack anything
-            while ((self.thisDatagramSize == 0 and len(self.datagramBuffer)) or
-                   (self.thisDatagramSize > 0 and len(self.datagramBuffer) >= self.thisDatagramSize)):
+            #  check if we need to unpack anything. 
+            while ((self.thisDatagramSize == 0 and self.datagramBuffer.length() >= 4) or
+                   (self.thisDatagramSize > 0 and self.datagramBuffer.length() >= self.thisDatagramSize)):
 
                 #  check if we have enough to unpack the length
-                if (self.thisDatagramSize == 0 and len(self.datagramBuffer) >= 4):
+                if (self.thisDatagramSize == 0 and self.datagramBuffer.length() >= 4):
 
                     #  we have rx'd at least 4 bytes, unpack the datagram length
                     #  datagram length is big endian uint32
                     self.thisDatagramSize = struct.unpack('!I', self.datagramBuffer[0:4])[0]
 
                     #  delete the len bytes from the buffer
-                    del self.datagramBuffer[0:4]
+                    self.datagramBuffer.remove(0, 4)
 
                 #  check if we have at least 1 full datagram
-                if (self.thisDatagramSize > 0 and len(self.datagramBuffer) >= self.thisDatagramSize):
+                if (self.thisDatagramSize > 0 and self.datagramBuffer.length() >= self.thisDatagramSize):
 
                     #  parse the datagram to get type
                     response = CamtrawlServer_pb2.msg()
-                    response.ParseFromString(self.datagramBuffer[0:self.thisDatagramSize])
+                    response.ParseFromString(bytes(self.datagramBuffer[0:self.thisDatagramSize]))
 
                     #  parse the data based on the datagram type
                     if (response.type == CamtrawlServer_pb2.msg.msgType.Value('CVMATDATA')):
@@ -615,6 +615,7 @@ class CamtrawlClient(QtCore.QObject):
 
                         #  emit the sensorDataAvailable signal for each id+header sent
                         for sensor in sensorData.sensors:
+
                             #  convert the timestamp to a datetime obj
                             time_obj = datetime.datetime.fromtimestamp(sensor.timestamp)
 
@@ -625,6 +626,8 @@ class CamtrawlClient(QtCore.QObject):
                             else:
                                 #  this data should be handled as synced
                                 self.syncSensorData.emit(sensor.id, sensor.header, time_obj, sensor.data)
+                                
+                        self.dataRequestComplete.emit()
 
                     elif (response.type == CamtrawlServer_pb2.msg.msgType.Value('PARAMDATA')):
                         #  we received a parameterData response - unpack the response
@@ -640,9 +643,8 @@ class CamtrawlClient(QtCore.QObject):
                         self.parameterData.emit(paramData.module, paramData.parameter, paramData.value,
                                 ok, paramData.error_string)
 
-
                     #  lastly, remove this datagram from the buffer
-                    del self.datagramBuffer[0:self.thisDatagramSize]
+                    self.datagramBuffer.remove(0, self.thisDatagramSize)
 
                     # reset the datagram size
                     self.thisDatagramSize = 0

@@ -15,7 +15,7 @@
 #       print hex(checksum)
 #
 """
-The SerialDevice class handles I/O for an individual serial port. It is intened to be
+The SerialDevice class handles I/O for an individual serial port. It is intended to be
 run in its own thread and polls the serial port, buffers the received data, processes
 it, and emits "whole messages" via the SerialDataReceived signal. Typically this
 class is used internally by the SerialMonitor class which manages the threads and
@@ -124,9 +124,9 @@ class SerialDevice(QObject):
         try:
             #  create the serial port use the factory function serial_for_url to return either
             #  a native serial port instance or a RFC 2217 instance based on the port definition
-            self.serialPort = serial.serial_for_url(deviceParams['port'], do_not_open=True, baudrate=deviceParams['baud'],
-                                          bytesize=deviceParams['byteSize'], parity=deviceParams['parity'].upper(),
-                                          stopbits=deviceParams['stopBits'])
+            self.serialPort = serial.serial_for_url(deviceParams['port'], do_not_open=True,
+                    baudrate=deviceParams['baud'], bytesize=deviceParams['byteSize'],
+                    parity=deviceParams['parity'].upper(), stopbits=deviceParams['stopBits'])
 
             #  set flow control
             if deviceParams['flowControl'].upper() == 'RTSCTS':
@@ -194,7 +194,6 @@ class SerialDevice(QObject):
             #  this is not the droid we're looking for
             return
 
-
         #  check that we're running
         if (self.pollTimer):
 
@@ -214,6 +213,10 @@ class SerialDevice(QObject):
             self.serialPort.close()
 
             #  emit the SerialPortClosed signal
+            self.SerialPortClosed.emit(self.deviceName)
+            
+        else:
+            #  if the poll timer is None, we aren't running so we immediately emit the closed signal
             self.SerialPortClosed.emit(self.deviceName)
 
 
@@ -330,30 +333,32 @@ class SerialDevice(QObject):
                     err = None
                     #  check for complete lines
                     if line.endswith('\n') or line.endswith('\r'):
-                        #  this line is complete - strip the newline character(s)
-                        line = line.rstrip('\r\n')
+                        #  this line is complete - strip the newline character(s) and whitespace
+                        line = line.rstrip('\r\n').strip()
+                        
+                        #  and make sure we have some text
+                        if line:
+                            #  we do, process line
+                            try:
+                                if self.parseType == 2:
+                                    #  use regular expression to parse
+                                    parts = self.parseExp.findall(line)
+                                    data = parts[self.parseIndex]
+                                elif self.parseType == 1:
+                                    #  use a delimiter to parse
+                                    parts = line.split(self.parseExp)
+                                    data = parts[self.parseIndex]
+                                else:
+                                    # do not parse - pass whole line
+                                    data = line
+                            except Exception as e:
+                                data = None
+                                err = SerialError('Error parsing input from ' + self.deviceName + \
+                                                   '. Incorrect parsing configuration or malformed data stream.', \
+                                                   parent=e)
 
-                        #  process line
-                        try:
-                            if self.parseType == 2:
-                                #  use regular expression to parse
-                                parts = self.parseExp.findall(line)
-                                data = parts[self.parseIndex]
-                            elif self.parseType == 1:
-                                #  use a delimiter to parse
-                                parts = line.split(self.parseExp)
-                                data = parts[self.parseIndex]
-                            else:
-                                # do not parse - pass whole line
-                                data = line
-                        except Exception as e:
-                            data = None
-                            err = SerialError('Error parsing input from ' + self.deviceName + \
-                                               '. Incorrect parsing configuration or malformed data stream.', \
-                                               parent=e)
-
-                        # emit a signal containing data from this line
-                        self.SerialDataReceived.emit(self.deviceName, data, err)
+                            # emit a signal containing data from this line
+                            self.SerialDataReceived.emit(self.deviceName, data, err)
 
                     elif (self.cmdPromptLen > 0) and (line[-self.cmdPromptLen:] == self.cmdPrompt):
                         #  this line (or the end of it) matches the command prompt
@@ -417,7 +422,6 @@ class SerialDevice(QObject):
 
                     # emit a signal containing data from this line
                     self.SerialDataReceived.emit(self.deviceName, data, err)
-
 
 
     @pyqtSlot()

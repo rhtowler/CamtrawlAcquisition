@@ -124,25 +124,92 @@ server:
 
 
 #  The sensors section contains configuration details for the handling of sensor data.
-#  In SimpleAcquisition.py the only sensor data source is the CamtrawlServer.
+#  The acquisition application can log NMEA-0183 like serial data from local devices,
+#  network ports, or RFC2217 compatible serial servers. The data must be comma
+#  delimited ASCII text terminated by \n or \n\r and the first field should uniquely
+#  identify the data.
+#
+#  Data can be logged in sync with the images, where the most recent data will be
+#  written at the same time the cameras are triggered, and it can also be logged
+#  at the time it is received or asynchronously. Synced data is written to the 
+#  metadata database sensor_data table and async data is written to the
+#  async_data table. Data in the sensor_data table is logged with the image number
+#  it is synced with and data in the async_data table includes the time the data was
+#  received.
+#
+#  You can also send data to sensors (via CamtrawlServer) to operate polled sensors
+#  or other devices.
 sensors:
 
-    #  if a sensor header is unknown, it will be logged as the default type.
+    #  if a sensor header is unknown, it will be logged as the default type. Specify
+    #  if the default is to log data synchronously or asynchronously.
     default_type: synchronous
 
     #  synchronous sensor data is cached when received and written to disk when
     #  the cameras are triggered and it is associated with an image number. List the
-    #  headers here for sensor datagrams that should be logged as synchronous
-    synchronous: [$GPGGA, $GPRMC, $GPGLL]
+    #  headers here for sensor datagrams that should be logged as synchronous.
+    synchronous: [$GPRMC, $GPZDA]
 
     #  asynchronous sensor data is written to disk when received. List the
-    #  headers here for sensor datagrams that should be logged as asynchronous
+    #  headers here for sensor datagrams that should be logged as asynchronous.
     asynchronous: []
 
-    #  synchronous_timeout specifies how long synced sensor data will be cached (in seconds.)
+    #  synchronous_timeout specifies how long synced sensor data will be cached
+    #  (in seconds.) Data older than this will be ignored and data for that sensor 
+    #  will not be logged until fresh data is received. Set this to -1 to always
+    #  log synced sensor data regardless of freshness.
     synchronous_timeout: 5
 
+    #  specify any additional sensors that should be logged during acquisition. 
+    installed_sensors:    
+        #  Specify the name of the sensor - the sensor names must be unique
+        #altimeter:        
+            # Specify asynchronous or synchronous logging for this sensors datagrams.
+            # Datagrams whose headers aren't explicitly configured as synced_headers
+            # or async_headers will be logged this way. If type is omitted, the sensor
+            # will be logged as specified in default_type above.
+            #type: asynchronous
+            # If needed, you can configure sync and async logging for individual datagram
+            # types by defining the headers in the synced_headers and/or async_headers
+            # list. If these fields are omitted, all datagrams will be logged according to
+            # the type (specified above)
+            #synced_headers: [$GPGGA]
+            #async_headers: [$GPZDA]
+            #  Specify the serial port. This is passed directly to pySerial and can be a local 
+            #  serial port like "COM3" or "/dev/ttyUSB0" or "rfc2217://192.168.10.1:12345" or
+            #   "socket://192.168.0.10:98765" See the pySerial documentation for more info.
+            #serial_port: COM4
+            #  Specify the baud rate of this sensors serial port. I believe this would be ignored
+            #  for network based ports.
+            #serial_baud: 9600
+            # For sensors that do not generate a header, you can add one by including the
+            # add_header parameter. Set this to the string that will be prepended to the sensor
+            # data when it is received. This allows you to more easily ID this data. If omitted
+            # nothing is prepended to the data when received. For example, the altimeter
+            # defined here only outputs a height off bottom as "123.4m\n". By setting add_header
+            # to "$ALTIM" the camera system will see this data as "$ALTIM,123.4m\n"
+            #add_header: $ALTIM
+            # You can specify a logging interval to log data in the database at a slower rate
+            # than it is being received to limit the volume of data stored in the database.
+            # Data is still made available to the system (including the server) at the sesnor's
+            # output rate, this only affects the rate it is logged in te database. This only
+            # has an effect on async sensors. Sync'd sensors are always written when an image
+            # is acquired.
+            #logging_interval_ms: 1000
 
+        # thrusters:
+            # type: asynchronous
+            # logging_interval_ms: 500
+            # serial_port: /dev/ttyUSB0
+            # serial_baud: 9600
+            
+        # clumpweight:
+            # type: asynchronous
+            # logging_interval_ms: 1000
+            # serial_port: socket://192.168.10.5:2345
+            # serial_baud: 115200
+    
+    
 # Define the individual camera parameters
 cameras:
 

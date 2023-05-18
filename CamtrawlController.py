@@ -149,7 +149,7 @@ class CamtrawlController(QtCore.QObject):
           terminate the thread.
 
         """
-        self.logger.info("Stopping CamtrawlController...")
+        self.logger.debug("Stopping CamtrawlController...")
         self.stopDevice.emit([self.deviceParams['deviceName']])
 
 

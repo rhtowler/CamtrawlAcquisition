@@ -81,7 +81,7 @@ class SpinCamera(QtCore.QObject):
     #
     #  The total HDR exposure in us will be the sum of your individual HDR exposures
     #  plus (3x this value * 1000).
-    HDR_SW_TRIG_DELAY = 35
+    HDR_SW_TRIG_DELAY = 250
 
     #  Specify the number of frames that should be discarded when starting acquisition
     #  to ensure that the first triggered image has the expected settings.
@@ -108,7 +108,10 @@ class SpinCamera(QtCore.QObject):
         self.device_info = None
         self.rotation = 'none'
         self.timeout = 2000
-        self.raw_conversion = PySpin.SPINNAKER_COLOR_PROCESSING_ALGORITHM_HQ_LINEAR
+        if PySpin.FLIR_SPINNAKER_VERSION_MAJOR > 2:
+            self.raw_conversion = PySpin.SPINNAKER_COLOR_PROCESSING_ALGORITHM_HQ_LINEAR
+        else:
+            self.raw_conversion = PySpin.HQ_LINEAR
         self.hdr_enabled = False
         self.hdr_save_merged = False
         self.hdr_signal_merged = False
@@ -492,6 +495,7 @@ class SpinCamera(QtCore.QObject):
         #  this class handles triggering the camera for each of the 4 exposures.
         if self.hdr_enabled and self.n_triggered < 4:
             #  Yes, we're doing HDR and we've triggered less than 4 times - trigger again
+            print("HDR TRIGGER")
             self.n_triggered = self.n_triggered + 1
             if self.trigger_mode == PySpin.TriggerSource_Software:
                 #  If we're software triggering in HDR mode, we have to delay our
@@ -657,6 +661,14 @@ class SpinCamera(QtCore.QObject):
                 merged_image['timestamp'] = image['timestamp']
                 merged_image['filename'] = self.hdr_merged_filename
                 merged_image['image_number'] = self.image_number
+                merged_image['ok'] = True
+
+                #  add the save_still and save_frame states - this is used by
+                #  the image_writer to determine if an image should be written as
+                #  an image file and/or a video frame and it is logged in the
+                #  database images table to track stills and frames saved.
+                merged_image['save_still'] = self.save_this_still
+                merged_image['save_frame'] = self.save_this_frame
 
                 #  and emit our image signals
                 if self.emit_hdr:
@@ -936,8 +948,10 @@ class SpinCamera(QtCore.QObject):
         chunk_data = raw_image.GetChunkData()
 
         #  convert from raw to our preferred Numpy format
-        converted_image = self.processor.Convert(raw_image, self.ND_pixelFormat)
-        #converted_image = raw_image.Convert(self.ND_pixelFormat, self.raw_conversion)
+        if PySpin.FLIR_SPINNAKER_VERSION_MAJOR > 2:
+            converted_image = self.processor.Convert(raw_image, self.ND_pixelFormat)
+        else:
+            converted_image = raw_image.Convert(self.ND_pixelFormat, self.raw_conversion)
 
         #  populate the return dict
         image_data['data'] = converted_image.GetNDArray().copy()
@@ -997,10 +1011,15 @@ class SpinCamera(QtCore.QObject):
             self.acquisitionStarted.emit(self, self.camera_name, False)
             return
 
-        #  create an instance of the PySpin ImageProcessor
-        self.processor = PySpin.ImageProcessor()
-        self.processor.SetColorProcessing(self.raw_conversion)
-        
+        if PySpin.FLIR_SPINNAKER_VERSION_MAJOR > 2:
+            #  create an instance of the PySpin ImageProcessor
+            self.processor = PySpin.ImageProcessor()
+            self.processor.SetColorProcessing(self.raw_conversion)
+        else:
+            #  PySpin versions < 3 don't have the processor class and conversion
+            #  is handled by the raw_image class
+            self.processor = None
+
         #  create a instance of image_writer
         self.image_writer = ImageWriter.ImageWriter(self.camera_name)
 
