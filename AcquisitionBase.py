@@ -401,7 +401,16 @@ class AcquisitionBase(QtCore.QObject):
         #  installed_sensors section of the config file. The sensor data is assumed to be
         #  NMEA like ASCII data terminated by LF or CR/LF. The sensors can be connected to
         #  a local serial port, or a network based serial server or a simple network socket.
-        if (self.configuration['sensors']['installed_sensors'] is not None) and (len(self.configuration['sensors']['installed_sensors']) > 0):
+        
+        #  first check if the installed_sensors section of the .yml config file is empty.
+        #  This is allowed, but it results in self.configuration['sensors']['installed_sensors']
+        #  being set to None. We need it set to an empty dict. This is not an issue if it
+        #  omitted as it is initialized to an empty dict.
+        if self.configuration['sensors']['installed_sensors'] is None:
+             self.configuration['sensors']['installed_sensors'] = {}
+        
+        #  now set up sensors if any are specified in the yml file
+        if len(self.configuration['sensors']['installed_sensors']) > 0:
             self.logger.info("Adding sensors:")
             for sensor_name in self.configuration['sensors']['installed_sensors']:
                 

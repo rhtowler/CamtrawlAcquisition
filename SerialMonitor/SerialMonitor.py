@@ -272,15 +272,21 @@ class SerialMonitor(QObject):
           devices will be stopped.
         """
 
-        if devices == None:
-            #  no devices specified - get a list of all devices
-            devices = list(self.devices.keys())
-        elif (type(devices) is str):
-            #  device was specified as a string, put it in a list
-            devices = [devices]
+        #  first check if any devices are running
+        if len(self.threads) == 0:
+            #  no devices are running so just emit the SerialDevicesStopped signal
+            self.SerialDevicesStopped.emit()
+        else:
+            #  at least one device is being monitored so tell the device(s) to stop
+            if devices == None:
+                #  no devices specified - get a list of all devices
+                devices = list(self.devices.keys())
+            elif (type(devices) is str):
+                #  device was specified as a string, put it in a list
+                devices = [devices]
 
-        #  emit the stopDevice signal to inform device threads to shut down
-        self.stopDevice.emit(devices)
+            #  emit the stopDevice signal to inform device threads to shut down
+            self.stopDevice.emit(devices)
 
 
     def removeDevice(self, devices=None):
